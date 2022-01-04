@@ -1,5 +1,5 @@
-use crate::error::Error;
-use crate::{command, connection::Connection, resp::Resp};
+use crate::pubsub;
+use crate::{command, connection::Connection, error::Error, resp::Resp, subscriber::Subscriber};
 use bytes::Bytes;
 use tokio::net::{TcpStream, ToSocketAddrs};
 
@@ -22,9 +22,7 @@ impl Client {
 
         match self.read_response().await? {
             Resp::SimpleString(resp) if resp == "PONG" => Ok(()),
-            rest => Err(Error::Invalid(
-                format!("invalid response {:?}", rest).into(),
-            )),
+            others => Err(others.to_error()),
         }
     }
 
@@ -36,9 +34,7 @@ impl Client {
         dbg!(&r);
         match r {
             Resp::SimpleString(resp) if resp == "OK" => Ok(None),
-            rest => Err(Error::Invalid(
-                format!("invalid response {:?}", rest).into(),
-            )),
+            others => Err(others.to_error()),
         }
     }
 
@@ -49,9 +45,7 @@ impl Client {
             Resp::SimpleString(resp) => Ok(Some(resp.into())),
             Resp::BulkString(resp) => Ok(Some(resp)),
             Resp::Null => Ok(None),
-            rest => Err(Error::Invalid(
-                format!("invalid response {:?}", rest).into(),
-            )),
+            others => Err(others.to_error()),
         }
     }
 
@@ -67,6 +61,46 @@ impl Client {
         self.handle_incr_decr_resp().await
     }
 
+    pub async fn publish(&mut self, channel: &str, message: Bytes) -> Result<u64, Error> {
+        let incr = Resp::from(command::Publish::new(channel, message));
+        self.connection.write_data(&incr).await?;
+
+        match self.read_response().await? {
+            Resp::Integer(v) => Ok(v as u64),
+            rest => Err(Error::Invalid(
+                format!("invalid response {:?}", rest).into(),
+            )),
+        }
+    }
+
+    pub async fn subscribe<'a>(
+        &'a mut self,
+        channels: Vec<String>,
+    ) -> Result<Subscriber<'a>, Error> {
+        let incr = Resp::from(command::Subscribe::new(&channels));
+        self.connection.write_data(&incr).await?;
+
+        for channel in &channels {
+            use pubsub::Message;
+
+            let resp = self.read_response().await?;
+            match pubsub::parse(&resp)? {
+                Message::Subscribe(ch, _) if ch == channel => {}
+                others => {
+                    return Err(Error::Other(
+                        format!(
+                            "message whose channel is {:?} is required, but {:?}",
+                            channel, others
+                        )
+                        .into(),
+                    ))
+                }
+            }
+        }
+
+        Ok(Subscriber::new(self, channels))
+    }
+
     async fn handle_incr_decr_resp(&mut self) -> Result<i64, Error> {
         match self.read_response().await? {
             Resp::Integer(resp) => Ok(resp),
@@ -77,7 +111,7 @@ impl Client {
         }
     }
 
-    async fn read_response(&mut self) -> Result<Resp, Error> {
+    pub(crate) async fn read_response(&mut self) -> Result<Resp, Error> {
         let resp = self.connection.read_data().await?;
         match resp {
             Some(r) => Ok(r),

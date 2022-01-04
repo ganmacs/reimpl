@@ -1,3 +1,4 @@
+use crate::error::{self, Error};
 use bytes::{Buf, Bytes};
 use std::io::{self, Cursor};
 use tokio::io::AsyncWriteExt;
@@ -167,6 +168,10 @@ impl Resp {
             Resp::Array(r) => r.push(Resp::Integer(v)),
             _ => panic!("type mismatched"),
         }
+    }
+
+    pub(crate) fn to_error(&self) -> Error {
+        Error::Other(format!("unexpected token: {:?}", self).into())
     }
 }
 
