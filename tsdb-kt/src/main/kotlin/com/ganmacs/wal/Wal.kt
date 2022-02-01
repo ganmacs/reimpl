@@ -1,0 +1,142 @@
+package com.ganmacs.wal
+
+import org.slf4j.Logger
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import kotlin.math.min
+
+internal const val pageSize = 32 * 1024                   // 32KB
+internal const val recordHeaderSize = 7                   // type(1 bytes) + length(2 bytes) + CRC32(4 bytes)
+internal const val defaultSegmentSize = 128 * 1024 * 1024 // 128 MB
+
+internal enum class WalType(val v: Byte) {
+    Full(1),
+    First(2),
+    Last(3),
+    Middle(4),
+}
+
+class Wal(
+    private val logger: Logger,
+    private val dir: Path,
+    private val segmentSize: Int = defaultSegmentSize,
+) {
+    private val page = Page()
+    private lateinit var segment: Segment
+    private var donePage: Int = 0
+
+    init {
+        if (segmentSize % pageSize != 0) {
+            throw Error("invalid page size")
+        }
+
+        try {
+            Files.createDirectories(dir)
+        } catch (e: FileAlreadyExistsException) {
+            // just ignore
+        } catch (e: IOException) {
+            logger.error("failed to create dir: $e")
+            throw e
+        }
+
+        val seg = Segment(dir, getNextSegmentIndex(dir))
+        setSegment(seg)
+    }
+
+    fun log(bufs: List<ByteArray>) {
+        for ((i, buf) in bufs.withIndex()) {
+            log(buf, i == bufs.size - 1)
+        }
+    }
+
+    // Do not perform fsync per log.
+    // https://github.com/prometheus/prometheus/issues/5869
+    private fun log(buf: ByteArray, final: Boolean) {
+        // TODO: get lock
+        val remaining = page.availableSpace() + // free space in page
+                remainingPagesInCurrentSegment() * (pageSize - recordHeaderSize) // free space in active segment
+
+        logger.info(
+            "remaining: $remaining, page avaiable: ${page.availableSpace()}," +
+                    "current segment remainging: ${remainingPagesInCurrentSegment()}" +
+                    ", donepage: $donePage"
+        )
+
+        if (remaining < buf.size) {
+            createNextSegment()
+            return
+        }
+
+        var idx = 0
+        var offset = 0
+        while (offset < buf.size) {
+            val bsize = buf.size - offset
+            val availablePageSpace = page.availableSpace()
+            val len = min(bsize, availablePageSpace)
+            val type = if (availablePageSpace > bsize && idx == 0) {
+                WalType.Full
+            } else if (availablePageSpace > bsize) {
+                WalType.Last
+            } else if (idx == 0) {
+                WalType.First
+            } else {
+                WalType.Middle
+            }
+
+            offset += page.appendRecord(type, data = buf, offset = offset, len = len)
+
+            if (page.full()) {
+                logger.info("full")
+                flushPage(true)
+            }
+            idx++
+        }
+
+        if (page.allocated > 0) { // TOOO: check final?
+            flushPage(false)
+        }
+    }
+
+    private fun createNextSegment() {
+        if (page.bufferedDataSize() > 0) {
+            flushPage(true)
+        }
+
+        val prev = segment
+
+        val next = Segment(dir, segment.index + 1)
+        setSegment(next)
+
+        // blocking. may be better to be executed on another thread.
+        prev.fsync()
+        prev.close()
+    }
+
+    private fun flushPage(clear: Boolean = false) {
+        if (clear) {
+            page.clearSetup()
+        }
+
+        val len = page.bufferedDataSize()
+        segment.write(this.page.buf.array(), page.flushed, len)
+        page.flushed += len
+
+        logger.debug("flush size=$len")
+
+        if (clear) {
+            page.clear()
+        }
+    }
+
+    private fun remainingPagesInCurrentSegment(): Int = pagesPerSegment() - donePage
+
+    private fun pagesPerSegment(): Int = segmentSize / pageSize
+
+    private fun setSegment(segment: Segment) {
+        this.segment = segment
+
+        val len = segment.length()
+        this.donePage = len / pageSize
+    }
+}
