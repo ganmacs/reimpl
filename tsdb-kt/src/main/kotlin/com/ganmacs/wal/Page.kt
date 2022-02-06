@@ -9,18 +9,20 @@ private fun ByteBuffer.putU32(value: UInt): ByteBuffer = this.putInt(value.toInt
 
 internal class Page {
     var allocated = 0
+        private set
     var flushed = 0
+
     val buf: ByteBuffer = ByteBuffer.allocate(pageSize) // FIXME: byte can represent -127 ~ 128
 
-    fun availableSpace(): Int = (pageSize - allocated) - recordHeaderSize
+    fun availableSpace(): Int = pageSize - allocated
 
     fun bufferedDataSize(): Int = allocated - flushed
 
-    fun clearSetup() {
-        flushed = pageSize
+    fun fillData() {
+        allocated = pageSize
     }
 
-    fun full(): Boolean = availableSpace() <= 0
+    fun full(): Boolean = availableSpace() < recordHeaderSize
 
     fun appendRecord(type: WalType, data: ByteArray, len: Int, offset: Int): Int {
         buf.position(allocated) // to last

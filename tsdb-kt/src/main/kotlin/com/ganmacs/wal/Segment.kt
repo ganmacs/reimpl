@@ -6,6 +6,7 @@ import java.io.IOException
 import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.name
 
 internal class SegmentRef(
     val name: String,
@@ -57,7 +58,7 @@ private fun loadSegments(dir: Path): List<SegmentRef> {
     val segRefs: MutableList<SegmentRef> = mutableListOf()
 
     for (file in Files.list(dir)) {
-        val name = file.fileName.toString()
+        val name = file.fileName.name
         val index = try {
             Integer.parseInt(name)
         } catch (e: NumberFormatException) {

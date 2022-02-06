@@ -19,6 +19,11 @@ dependencies {
     implementation("io.micrometer:micrometer-registry-prometheus")
 
     testImplementation(kotlin("test"))
+
+    testImplementation(platform("org.junit:junit-bom:5.8.1"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("io.mockk:mockk:1.12.1")
+
 }
 
 tasks.test {

@@ -24,7 +24,7 @@ class Wal(
 ) {
     private val page = Page()
     private lateinit var segment: Segment
-    private var donePage: Int = 0
+    private var donePages: Int = 0
 
     init {
         if (segmentSize % pageSize != 0) {
@@ -55,24 +55,23 @@ class Wal(
     private fun log(buf: ByteArray, final: Boolean) {
         // TODO: get lock
         val remaining = page.availableSpace() + // free space in page
-                remainingPagesInCurrentSegment() * (pageSize - recordHeaderSize) // free space in active segment
+                (pageSize - recordHeaderSize) * (remainingPagesInCurrentSegment() - 1) // free space in active segment (-1 is for using by current page)
 
-        logger.info(
-            "remaining: $remaining, page avaiable: ${page.availableSpace()}," +
-                    "current segment remainging: ${remainingPagesInCurrentSegment()}" +
-                    ", donepage: $donePage"
+        logger.debug(
+            "buf.size: ${buf.size}, remaining: $remaining, page available: ${page.availableSpace()}," +
+                    "current segment remaining: ${remainingPagesInCurrentSegment()}" +
+                    ", donePage: $donePages"
         )
 
-        if (remaining < buf.size) {
+        if (remaining < (buf.size + recordHeaderSize)) {
             createNextSegment()
-            return
         }
 
         var idx = 0
         var offset = 0
         while (offset < buf.size) {
             val bsize = buf.size - offset
-            val availablePageSpace = page.availableSpace()
+            val availablePageSpace = page.availableSpace() - recordHeaderSize
             val len = min(bsize, availablePageSpace)
             val type = if (availablePageSpace > bsize && idx == 0) {
                 WalType.Full
@@ -84,52 +83,55 @@ class Wal(
                 WalType.Middle
             }
 
+            logger.info("append len=$len, offset=$offset")
             offset += page.appendRecord(type, data = buf, offset = offset, len = len)
 
             if (page.full()) {
-                logger.info("full")
+                logger.info("page is full")
                 flushPage(true)
             }
             idx++
         }
 
-        if (page.allocated > 0) { // TOOO: check final?
+        if (final && page.allocated > 0) {
             flushPage(false)
         }
     }
 
     private fun createNextSegment() {
-        if (page.bufferedDataSize() > 0) {
+        // for flush all data in current page
+        if (page.allocated > 0) {
             flushPage(true)
         }
 
         val prev = segment
-
         val next = Segment(dir, segment.index + 1)
         setSegment(next)
 
+        logger.debug("Created new segment. old=${segment.index}, new=${segment.index + 1}")
         // blocking. may be better to be executed on another thread.
         prev.fsync()
         prev.close()
     }
 
     private fun flushPage(clear: Boolean = false) {
-        if (clear) {
-            page.clearSetup()
+        val clearFlag = clear || page.full()
+        if (clearFlag) {
+            page.fillData() // this is need to donePages. `len / pageSize` is necessary
         }
 
         val len = page.bufferedDataSize()
+        logger.debug("page is flushing. segment=${segment.index} size=$len, flushed=${page.flushed}, allocated=${page.allocated}")
         segment.write(this.page.buf.array(), page.flushed, len)
         page.flushed += len
 
-        logger.debug("flush size=$len")
-
-        if (clear) {
+        if (clearFlag) {
+            donePages++
             page.clear()
         }
     }
 
-    private fun remainingPagesInCurrentSegment(): Int = pagesPerSegment() - donePage
+    private fun remainingPagesInCurrentSegment(): Int = pagesPerSegment() - donePages
 
     private fun pagesPerSegment(): Int = segmentSize / pageSize
 
@@ -137,6 +139,6 @@ class Wal(
         this.segment = segment
 
         val len = segment.length()
-        this.donePage = len / pageSize
+        this.donePages = len / pageSize
     }
 }

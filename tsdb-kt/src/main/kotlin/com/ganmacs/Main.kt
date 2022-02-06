@@ -15,20 +15,19 @@ fun main() {
     val logger = KotlinLogging.logger("tsdb")
 
     val series = "http_requests_total{job=\"prometheus\",group=\"canary\"}".toByteArray()
-
     val wal = Wal(
         logger = logger,
         dir = Path.of("./wal"),
         segmentSize = pageSize
     )
 
-    val l = mutableListOf<String>()
-
-    for (i in 1..1000) {
-        l.add("http_requests_total{job=\"prometheus\",group=\"canary\",id=$i}")
+    for (i in 1..10) {
+        val l = mutableListOf<String>()
+        for (id in 1..10) {
+            l.add("http_requests_total{job=\"prometheus\",group=\"canary\",id=$id}")
+        }
+        wal.log(l.map(String::toByteArray))
     }
-
-    wal.log(l.map(String::toByteArray))
 
     logger.info { "hello" }
 }
