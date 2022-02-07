@@ -46,6 +46,8 @@ internal class WalTest {
             wal.log(l)
             val walFiles2: List<String> = Files.list(tmpDir).toList().map { it.fileName.name }.sorted()
             assertEquals(listOf("00000000", "00000001"), walFiles2)
+
+            wal.close()
         }
     }
 }

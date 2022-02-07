@@ -25,6 +25,7 @@ class Wal(
     private val page = Page()
     private lateinit var segment: Segment
     private var donePages: Int = 0
+    private var closed = false
 
     init {
         if (segmentSize % pageSize != 0) {
@@ -42,6 +43,20 @@ class Wal(
 
         val seg = Segment(dir, getNextSegmentIndex(dir))
         setSegment(seg)
+    }
+
+    fun close() {
+        if (closed) {
+            throw Error("already closed")
+        }
+
+        if (page.allocated > 0) {
+            flushPage(true)
+        }
+
+        segment.fsync()
+        segment.close()
+        closed = true
     }
 
     fun log(bufs: List<ByteArray>) {
@@ -83,11 +98,11 @@ class Wal(
                 WalType.Middle
             }
 
-            logger.info("append len=$len, offset=$offset")
+            logger.debug("append len=$len, offset=$offset")
             offset += page.appendRecord(type, data = buf, offset = offset, len = len)
 
             if (page.full()) {
-                logger.info("page is full")
+                logger.debug("page is full")
                 flushPage(true)
             }
             idx++
