@@ -2,8 +2,8 @@ package com.ganmacs.wal
 
 import com.ganmacs.glog
 import java.io.File
+import java.io.FileOutputStream
 import java.io.IOException
-import java.io.RandomAccessFile
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.name
@@ -13,33 +13,35 @@ internal class SegmentRef(
     val index: Int,
 )
 
-internal class Segment(
-    dir: Path,
+class Segment(
+    val dir: Path,
     val index: Int,
 ) {
-    private val inner = try {
+    private val inner: File = try {
         val file = File(dir.toString(), segmentFileName(index))
         if (!file.createNewFile()) {
             glog.debug("file:${file.absolutePath} already exists")
         }
-        RandomAccessFile(file, "rw") // TODO: buffer
+        file
     } catch (e: IOException) {
-        glog.error("cannot open file(${File(dir.toString(), segmentFileName(index)).absoluteFile} : $e")
+        glog.error("cannot open file (${File(dir.toString(), segmentFileName(index)).absoluteFile} : $e")
         throw e
     }
+
+    private val outputStream = FileOutputStream(inner)
 
     fun length(): Int = inner.length().toInt() // TODO: check
 
     fun write(b: ByteArray, off: Int, len: Int) {
-        inner.write(b, off, len)
+        outputStream.write(b, off, len)
     }
 
     fun fsync() {
-        inner.fd.sync()
+        outputStream.fd.sync()
     }
 
     fun close() {
-        inner.close()
+        outputStream.close()
     }
 }
 
@@ -50,11 +52,11 @@ fun segmentIndexRange(dir: Path): Pair<Int?, Int?> {
 }
 */
 
-fun getNextSegmentIndex(dir: Path): Int = loadSegments(dir).getOrNull(0)?.let { it.index + 1 } ?: 0
+fun getNextSegmentIndex(dir: Path): Int = listSegments(dir).getOrNull(0)?.let { it.index + 1 } ?: 0
 
 private fun segmentFileName(index: Int): String = String.format("%08d", index)
 
-private fun loadSegments(dir: Path): List<SegmentRef> {
+internal fun listSegments(dir: Path): List<SegmentRef> {
     val segRefs: MutableList<SegmentRef> = mutableListOf()
 
     for (file in Files.list(dir)) {
