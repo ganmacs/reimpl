@@ -29,11 +29,11 @@ internal class Page {
 
         buf.putU8(type.v.toUByte())
         buf.putU16(len.toUShort())
-        buf.put(data, 0, len)
         CRC32().also {
             it.update(data, offset, len)
             buf.putU32(it.value.toUInt())
         }
+        buf.put(data, 0, len)
 
         allocated += len + recordHeaderSize
         return len
