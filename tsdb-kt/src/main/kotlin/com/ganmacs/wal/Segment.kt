@@ -14,13 +14,13 @@ internal class SegmentRef(
 )
 
 class Segment(
-    val dir: Path,
+    dir: Path,
     val index: Int,
 ) {
     private val inner: File = try {
         val file = File(dir.toString(), segmentFileName(index))
         if (!file.createNewFile()) {
-            glog.debug("file:${file.absolutePath} already exists")
+            glog.debug("skipped file:${file.absolutePath} creation. already exists")
         }
         file
     } catch (e: IOException) {
@@ -28,7 +28,9 @@ class Segment(
         throw e
     }
 
-    private val outputStream = FileOutputStream(inner)
+    private val outputStream by lazy { FileOutputStream(inner, true) }
+
+    val absolutePath: String = inner.absolutePath
 
     fun length(): Int = inner.length().toInt() // TODO: check
 

@@ -11,10 +11,22 @@ internal const val recordHeaderSize = 7                   // type(1 bytes) + len
 internal const val defaultSegmentSize = 128 * 1024 * 1024 // 128 MB
 
 internal enum class WalType(val v: Byte) {
+    PageTerm(0),
     Full(1),
     First(2),
     Last(3),
-    Middle(4),
+    Middle(4);
+
+    companion object {
+        fun fromInt(b: Int): WalType = when (b) {
+            0 -> PageTerm
+            1 -> Full
+            2 -> First
+            3 -> Last
+            4 -> Middle
+            else -> throw RuntimeException("invalid type while converting wal type $b")
+        }
+    }
 }
 
 class Wal(
