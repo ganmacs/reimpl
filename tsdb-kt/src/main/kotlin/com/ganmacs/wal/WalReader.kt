@@ -1,5 +1,6 @@
 package com.ganmacs.wal
 
+import java.io.EOFException
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
 
@@ -27,32 +28,52 @@ internal class WalReader(
     private val reader: SegmentReader,
 ) : Iterator<ByteArray> {
     private val buffer = ByteBuffer.allocate(pageSize)
+    private var ret: ByteArray? = null
 
-    override fun hasNext(): Boolean = reader.available()
+    override fun hasNext(): Boolean {
+        return try {
+            ret = ret ?: innerNext()
+            true
+        } catch (e: EOFException) {
+            false
+        }
+    }
 
     override fun next(): ByteArray {
-        reader.read(buffer.array(), 0, recordHeaderSize).getOrThrow() // TODO
+        if (!hasNext()) {
+            throw error("already EOF")
+        }
+
+        val record = ret!!
+        ret = null
+        return record
+    }
+
+    private fun innerNext(): ByteArray {
         while (true) {
+            reader.read(buffer.array(), 0, recordHeaderSize).getOrThrow()
+
             val walType = buffer.readWalType()
             if (walType == WalType.PageTerm) {
                 // consume remaining padding 0
-                reader.readAll(buffer.array(), 0)
+                reader.readAll(buffer.array(), 0).getOrThrow()
+
                 if (buffer.array().none { it == 0.toByte() }) {
-                    throw RuntimeException("padding includes 0. something invalid")
+                    throw error("padding includes 0. something invalid")
+
                 }
-                return byteArrayOf()
+                continue
             }
 
             val length = buffer.readLength()
             val checksum = buffer.readChecksum()
             val record = ByteArray(length)
-
-            reader.read(record, 0, length).getOrThrow() // TODO
+            reader.read(record, 0, length).getOrThrow()
 
             val crc = CRC32()
             crc.update(record, 0, length)
             if (crc.value.toUInt() != checksum) {
-                throw RuntimeException("checksum is invalid")
+                throw error("checksum is invalid")
             }
 
             if (walType == WalType.Full) {

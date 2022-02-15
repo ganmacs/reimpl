@@ -37,7 +37,6 @@ internal class WalReaderTest {
         assertEquals(expected, reader.next().toList())
         assertEquals(true, reader.hasNext())
         assertEquals(expected, reader.next().toList())
-        assertEquals(true, reader.hasNext())
-        assertEquals(byteArrayOf().toList(), reader.next().toList())
+        assertEquals(false, reader.hasNext())
     }
 }
