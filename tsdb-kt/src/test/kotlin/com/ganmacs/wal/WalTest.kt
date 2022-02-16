@@ -12,7 +12,6 @@ import kotlin.io.path.name
 import kotlin.streams.toList
 import kotlin.test.assertEquals
 
-
 internal class WalTest {
     private val logger = KotlinLogging.logger("test")
     private lateinit var tmpDir: Path

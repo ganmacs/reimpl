@@ -1,12 +1,16 @@
 package com.ganmacs.wal
 
 import mu.KotlinLogging
+import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.io.File
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlin.io.path.name
+import kotlin.streams.toList
 import kotlin.test.assertEquals
 
 internal class WalReaderTest {
@@ -25,6 +29,11 @@ internal class WalReaderTest {
         }
     }
 
+    @AfterEach
+    fun tearDown() {
+        File(tmpDir.toUri()).delete()
+    }
+
     @Test
     fun `reads single segment`() {
         val wal = Wal(logger = logger, dir = tmpDir, segmentSize = pageSize)
@@ -36,6 +45,28 @@ internal class WalReaderTest {
         assertEquals(true, reader.hasNext())
         assertEquals(expected, reader.next().toList())
         assertEquals(true, reader.hasNext())
+        assertEquals(expected, reader.next().toList())
+        assertEquals(false, reader.hasNext())
+    }
+
+    @Test
+    fun `read multiple segments`() {
+        // create segment=2
+        var wal = Wal(logger = logger, dir = tmpDir, segmentSize = pageSize)
+        wal.log(listOf(message, message).map { it.toByteArray() })
+        wal.close()
+
+        // create segment=1
+        wal = Wal(logger = logger, dir = tmpDir, segmentSize = pageSize)
+        wal.log(listOf(message, message).map { it.toByteArray() })
+        wal.close()
+
+        val segments = listOf(Segment(tmpDir, 0), Segment(tmpDir, 1))
+        val reader = WalReader(SegmentReader(segments))
+        val expected = message.toByteArray().toList()
+        assertEquals(expected, reader.next().toList())
+        assertEquals(expected, reader.next().toList())
+        assertEquals(expected, reader.next().toList())
         assertEquals(expected, reader.next().toList())
         assertEquals(false, reader.hasNext())
     }

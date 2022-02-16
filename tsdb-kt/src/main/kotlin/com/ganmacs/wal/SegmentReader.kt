@@ -47,18 +47,32 @@ class SegmentReader(
 
     constructor(segments: List<Segment>) : this(SegmentList(segments))
 
-    fun read(b: ByteArray, off: Int, len: Int): Result<Int> {
+    fun readExact(b: ByteArray, off: Int, len: Int) {
+        var r = 0
+        while ((len - r) > 0) {
+            val tt = read(b, off + r, len - r).getOrThrow()
+            r += tt
+        }
+    }
+
+    fun readAll(b: ByteArray, off: Int) {
+        val len = buffer.available()
+        if (b.size < len) throw error("size is too short. required $len but ${b.size}")
+        read(b, off, len).getOrThrow()
+    }
+
+    private fun read(b: ByteArray, off: Int, len: Int): Result<Int> {
         val rlen = try {
             buffer.read(b, off, len)
         } catch (e: IOException) {
             return Result.failure(e)
         }
 
-        if (len != rlen) {
-            return Result.failure(InvalidRecord("the data is insufficient expected len=$len, actual len=$rlen"))
-        }
-
         if (rlen != EOF) {
+            if (len != rlen) {
+                return Result.failure(InvalidRecord("the data is insufficient expected len=$len, actual len=$rlen"))
+            }
+
             offset += rlen
             return Result.success(rlen)
         }
@@ -66,38 +80,18 @@ class SegmentReader(
         return segments.next()?.let {
             offset = 0
             buffer = BufferedInputStream(FileInputStream(it.absolutePath), pageSize * 16)
-            buffer.reset()
 
             Result.success(0)
         } ?: Result.failure(EOFException("segment reader reached EOF"))
     }
 
-    fun readAll(b: ByteArray, off: Int) {
-        val len = buffer.available()
-        if (b.size < len) throw RuntimeException("size is too short. required $len but ${b.size}")
-        read(b, off, len)
-    }
-
     fun available(): Boolean {
         println(buffer.available())
-        println(buffer.available() > recordHeaderSize)
         println(segments.hasNext())
         return (buffer.available() > recordHeaderSize) || segments.hasNext()
     }
-
 
     fun close() {
         segments.forAllEach { it.close() }
     }
 }
-
-/*    override fun read(): Int {
-        val b = ByteArray(1)
-        val r = read(b)
-        if (r == -1) {// EOF
-            return -1
-        }
-
-        return b[0].toInt() // TODO
-    }
-     */

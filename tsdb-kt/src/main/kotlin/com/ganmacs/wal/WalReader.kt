@@ -1,5 +1,6 @@
 package com.ganmacs.wal
 
+import com.ganmacs.glog
 import java.io.EOFException
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
@@ -35,6 +36,7 @@ internal class WalReader(
             ret = ret ?: innerNext()
             true
         } catch (e: EOFException) {
+            glog.debug(e.toString())
             false
         }
     }
@@ -51,12 +53,12 @@ internal class WalReader(
 
     private fun innerNext(): ByteArray {
         while (true) {
-            reader.read(buffer.array(), 0, recordHeaderSize).getOrThrow()
+            reader.readExact(buffer.array(), 0, recordHeaderSize)
 
             val walType = buffer.readWalType()
             if (walType == WalType.PageTerm) {
                 // consume remaining padding 0
-                reader.readAll(buffer.array(), 0).getOrThrow()
+                reader.readAll(buffer.array(), 0)
 
                 if (buffer.array().none { it == 0.toByte() }) {
                     throw error("padding includes 0. something invalid")
@@ -68,7 +70,7 @@ internal class WalReader(
             val length = buffer.readLength()
             val checksum = buffer.readChecksum()
             val record = ByteArray(length)
-            reader.read(record, 0, length).getOrThrow()
+            reader.readExact(record, 0, length)
 
             val crc = CRC32()
             crc.update(record, 0, length)
