@@ -18,6 +18,8 @@ dependencies {
     implementation(platform("io.micrometer:micrometer-bom:1.8.2"))
     implementation("io.micrometer:micrometer-registry-prometheus")
 
+    implementation("com.google.guava:guava:31.0.1-jre")
+
     testImplementation(kotlin("test"))
 
     testImplementation(platform("org.junit:junit-bom:5.8.1"))

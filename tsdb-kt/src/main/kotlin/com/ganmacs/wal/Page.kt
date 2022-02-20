@@ -12,7 +12,7 @@ internal class Page {
         private set
     var flushed = 0
 
-    val buf: ByteBuffer = ByteBuffer.allocate(pageSize) // FIXME: byte can represent -127 ~ 128
+    var buf: ByteBuffer = ByteBuffer.allocate(pageSize) // FIXME: byte can represent -127 ~ 128
 
     fun availableSpace(): Int = pageSize - allocated
 
@@ -42,6 +42,6 @@ internal class Page {
     fun clear() {
         flushed = 0
         allocated = 0
-        buf.clear()
+        buf = ByteBuffer.allocate(pageSize) // TODO: just reset, not create new bytebuffer...
     }
 }

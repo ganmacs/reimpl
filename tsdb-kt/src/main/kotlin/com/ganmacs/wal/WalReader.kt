@@ -1,6 +1,8 @@
 package com.ganmacs.wal
 
 import com.ganmacs.glog
+import com.google.common.io.ByteArrayDataOutput
+import com.google.common.io.ByteStreams
 import java.io.EOFException
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
@@ -52,7 +54,10 @@ internal class WalReader(
     }
 
     private fun innerNext(): ByteArray {
+        val out: ByteArrayDataOutput = ByteStreams.newDataOutput()
         while (true) {
+            buffer.clear()
+
             reader.readExact(buffer.array(), 0, recordHeaderSize)
 
             val walType = buffer.readWalType()
@@ -78,8 +83,9 @@ internal class WalReader(
                 throw error("checksum is invalid")
             }
 
-            if (walType == WalType.Full) {
-                return record
+            out.write(buffer.array(), recordHeaderSize, length)
+            if (walType == WalType.Full || walType == WalType.Last) {
+                return out.toByteArray()
             }
         }
     }

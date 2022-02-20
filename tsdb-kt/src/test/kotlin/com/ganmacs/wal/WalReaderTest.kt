@@ -9,8 +9,6 @@ import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
-import kotlin.io.path.name
-import kotlin.streams.toList
 import kotlin.test.assertEquals
 
 internal class WalReaderTest {
@@ -46,6 +44,24 @@ internal class WalReaderTest {
         assertEquals(expected, reader.next().toList())
         assertEquals(true, reader.hasNext())
         assertEquals(expected, reader.next().toList())
+        assertEquals(false, reader.hasNext())
+    }
+
+    @Test
+    fun `large data`() {
+        val wal = Wal(logger = logger, dir = tmpDir, segmentSize = defaultSegmentSize)
+        val message = StringBuilder().also {
+            for (i in 0..(messageSizeToWrite * 3)) {
+                it.append(message)
+            }
+        }.toString()
+        wal.log(listOf(message).map { it.toByteArray() })
+        wal.close()
+
+        val reader = WalReader(SegmentReader(listOf(Segment(tmpDir, 0))))
+        val expected = message.toByteArray().toList()
+        assertEquals(true, reader.hasNext())
+        assertEquals(expected.size, reader.next().size)
         assertEquals(false, reader.hasNext())
     }
 
