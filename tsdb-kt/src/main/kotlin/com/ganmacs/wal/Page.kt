@@ -33,7 +33,7 @@ internal class Page {
             it.update(data, offset, len)
             buf.putU32(it.value.toUInt())
         }
-        buf.put(data, 0, len)
+        buf.put(data, offset, len)
 
         allocated += len + recordHeaderSize
         return len
