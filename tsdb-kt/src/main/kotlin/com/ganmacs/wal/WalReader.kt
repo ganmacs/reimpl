@@ -74,11 +74,10 @@ internal class WalReader(
 
             val length = buffer.readLength()
             val checksum = buffer.readChecksum()
-            val record = ByteArray(length)
-            reader.readExact(record, 0, length)
+            reader.readExact(buffer.array(), recordHeaderSize, length)
 
             val crc = CRC32()
-            crc.update(record, 0, length)
+            crc.update(buffer.array(), recordHeaderSize, length)
             if (crc.value.toUInt() != checksum) {
                 throw error("checksum is invalid")
             }
