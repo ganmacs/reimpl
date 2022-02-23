@@ -7,7 +7,6 @@ import java.io.EOFException
 import java.nio.ByteBuffer
 import java.util.zip.CRC32
 
-//private fun ByteBuffer.readU8() =
 private fun ByteBuffer.readU8(): UByte = this.get().toUByte()
 private fun ByteBuffer.readU16(): UShort = this.short.toUShort()
 private fun ByteBuffer.readU32(): UInt = this.int.toUInt()

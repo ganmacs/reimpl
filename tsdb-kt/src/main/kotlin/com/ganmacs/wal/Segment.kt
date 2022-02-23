@@ -2,35 +2,34 @@ package com.ganmacs.wal
 
 import com.ganmacs.glog
 import java.io.File
+import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.IOException
+import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.absolutePathString
 import kotlin.io.path.name
+import kotlin.io.path.nameWithoutExtension
 
 internal class SegmentRef(
     val name: String,
     val index: Int,
 )
 
-class Segment(
-    dir: Path,
+internal class Segment(
+    private val inner: File,
     val index: Int,
 ) {
-    private val inner: File = try {
-        val file = File(dir.toString(), segmentFileName(index))
-        if (!file.createNewFile()) {
-            glog.debug("skipped file:${file.absolutePath} creation. already exists")
+    companion object {
+        fun create(dir: Path, index: Int): Segment {
+            val file = File(dir.toString(), segmentFileName(index))
+            return Segment(file, index)
         }
-        file
-    } catch (e: IOException) {
-        glog.error("cannot open file (${File(dir.toString(), segmentFileName(index)).absoluteFile} : $e")
-        throw e
     }
 
     private val outputStream by lazy { FileOutputStream(inner, true) }
 
-    val absolutePath: String = inner.absolutePath
+    val absolutePath: String = inner.absolutePath.toString()
 
     fun length(): Int = inner.length().toInt() // TODO: check
 
@@ -46,13 +45,6 @@ class Segment(
         outputStream.close()
     }
 }
-
-/*
-fun segmentIndexRange(dir: Path): Pair<Int?, Int?> {
-    val refs = listSegment(dir)
-    return refs.getOrNull(0)?.index to refs.getOrNull(refs.size - 1)?.index
-}
-*/
 
 fun getNextSegmentIndex(dir: Path): Int = listSegments(dir).getOrNull(0)?.let { it.index + 1 } ?: 0
 

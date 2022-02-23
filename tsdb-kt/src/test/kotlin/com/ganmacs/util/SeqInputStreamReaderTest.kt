@@ -1,5 +1,6 @@
 package com.ganmacs.util
 
+import com.ganmacs.wal.SeqInputStreamReader
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import kotlin.test.assertEquals

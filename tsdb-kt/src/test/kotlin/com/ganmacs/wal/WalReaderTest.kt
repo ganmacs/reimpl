@@ -38,7 +38,7 @@ internal class WalReaderTest {
         wal.log(listOf(message, message).map { it.toByteArray() })
         wal.close()
 
-        val reader = WalReader(SegmentReader(listOf(Segment(tmpDir, 0))))
+        val reader = WalReader(SegmentReader(listOf(Segment.create(tmpDir, 0))))
         val expected = message.toByteArray().toList()
         assertEquals(true, reader.hasNext())
         assertEquals(expected, reader.next().toList())
@@ -58,7 +58,7 @@ internal class WalReaderTest {
         wal.log(listOf(message).map { it.toByteArray() })
         wal.close()
 
-        val reader = WalReader(SegmentReader(listOf(Segment(tmpDir, 0))))
+        val reader = WalReader(SegmentReader(listOf(Segment.create(tmpDir, 0))))
         val expected = message.toByteArray().toList()
         assertEquals(true, reader.hasNext())
         assertEquals(expected.size, reader.next().size)
@@ -77,7 +77,7 @@ internal class WalReaderTest {
         wal.log(listOf(message, message).map { it.toByteArray() })
         wal.close()
 
-        val segments = listOf(Segment(tmpDir, 0), Segment(tmpDir, 1))
+        val segments = listOf(Segment.create(tmpDir, 0), Segment.create(tmpDir, 1))
         val reader = WalReader(SegmentReader(segments))
         val expected = message.toByteArray().toList()
         assertEquals(expected, reader.next().toList())

@@ -15,7 +15,7 @@ data class SegmentRange(
 
 const val EOF: Int = -1
 
-class SegmentList(
+internal class SegmentList(
     private val segments: List<Segment>,
 ) {
     private var cur: Int = -1
@@ -36,7 +36,7 @@ class SegmentList(
 
 class InvalidRecord(override val message: String?) : RuntimeException(message)
 
-class SegmentReader(
+internal class SegmentReader(
     private val segments: SegmentList,
 ) {
     private var offset = 0

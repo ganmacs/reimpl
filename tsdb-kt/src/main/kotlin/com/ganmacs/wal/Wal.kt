@@ -44,16 +44,8 @@ class Wal(
             throw Error("invalid page size")
         }
 
-        try {
-            Files.createDirectories(dir)
-        } catch (e: FileAlreadyExistsException) {
-            // just ignore
-        } catch (e: IOException) {
-            logger.error("failed to create dir: $e")
-            throw e
-        }
-
-        val seg = Segment(dir, getNextSegmentIndex(dir))
+        Files.createDirectories(dir)
+        val seg = Segment.create(dir, getNextSegmentIndex(dir))
         setSegment(seg)
     }
 
@@ -110,7 +102,7 @@ class Wal(
                 WalType.Middle
             }
 
-            logger.debug("append len=$len, offset=$offset")
+            logger.debug("append len=$len, offset=$offset, type=$type")
             offset += page.appendRecord(type, data = buf, offset = offset, len = len)
 
             if (page.full()) {
@@ -132,7 +124,7 @@ class Wal(
         }
 
         val prev = segment
-        val next = Segment(dir, segment.index + 1)
+        val next = Segment.create(dir, segment.index + 1)
         setSegment(next)
 
         logger.debug("Created new segment. old=${segment.index}, new=${segment.index + 1}")
