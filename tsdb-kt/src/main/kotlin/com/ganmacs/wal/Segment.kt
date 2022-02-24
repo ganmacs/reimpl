@@ -7,14 +7,22 @@ import java.io.FileOutputStream
 import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
-import kotlin.io.path.absolutePathString
 import kotlin.io.path.name
-import kotlin.io.path.nameWithoutExtension
 
 internal class SegmentRef(
     val name: String,
     val index: Int,
 )
+
+internal class ReadOnlySegment(private val inner: File) : InputStream() {
+    init {
+        inner.setReadOnly()
+    }
+
+    private val input by lazy { FileInputStream(inner) }
+    override fun read(b: ByteArray, off: Int, len: Int): Int = input.read(b, off, len)
+    override fun read(): Int = input.read()
+}
 
 internal class Segment(
     private val inner: File,
@@ -32,6 +40,8 @@ internal class Segment(
     val absolutePath: String = inner.absolutePath.toString()
 
     fun length(): Int = inner.length().toInt() // TODO: check
+
+    fun readOnly(): ReadOnlySegment = ReadOnlySegment(inner)
 
     fun write(b: ByteArray, off: Int, len: Int) {
         outputStream.write(b, off, len)

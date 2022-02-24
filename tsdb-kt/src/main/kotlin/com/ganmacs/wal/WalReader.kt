@@ -27,7 +27,7 @@ private fun ByteBuffer.readChecksum(): UInt {
 }
 
 internal class WalReader(
-    private val reader: SegmentReader,
+    private val reader: SegmentBufReader,
 ) : Iterator<ByteArray> {
     private val buffer = ByteBuffer.allocate(pageSize)
     private var ret: ByteArray? = null
