@@ -5,7 +5,6 @@ import com.google.common.io.ByteArrayDataOutput
 import com.google.common.io.ByteStreams
 import java.io.EOFException
 import java.nio.ByteBuffer
-import java.util.zip.CRC32
 
 private fun ByteBuffer.readU8(): UByte = this.get().toUByte()
 private fun ByteBuffer.readU16(): UShort = this.short.toUShort()
@@ -77,10 +76,9 @@ internal class WalReader(
             val checksum = buffer.readChecksum()
             total += reader.readExact(buffer.array(), recordHeaderSize, length)
 
-            val crc = CRC32()
-            crc.update(buffer.array(), recordHeaderSize, length)
-            if (crc.value.toUInt() != checksum) {
-                throw error("checksum is invalid")
+            val actualChecksum = crc32(buffer.array(), recordHeaderSize, length)
+            if (actualChecksum != checksum) {
+                throw error("checksum is invalid, expected: $checksum, actual: $actualChecksum")
             }
 
             out.write(buffer.array(), recordHeaderSize, length)
@@ -90,3 +88,4 @@ internal class WalReader(
         }
     }
 }
+

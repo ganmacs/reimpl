@@ -7,6 +7,8 @@ private fun ByteBuffer.putU8(b: UByte): ByteBuffer = this.put(b.toByte())
 private fun ByteBuffer.putU16(value: UShort): ByteBuffer = this.putShort(value.toShort())
 private fun ByteBuffer.putU32(value: UInt): ByteBuffer = this.putInt(value.toInt())
 
+internal fun crc32(b: ByteArray, off: Int, len: Int) = CRC32().apply { update(b, off, len) }.value.toUInt()
+
 internal class Page {
     var allocated = 0
         private set
@@ -29,10 +31,7 @@ internal class Page {
 
         buf.putU8(type.v.toUByte())
         buf.putU16(len.toUShort())
-        CRC32().also {
-            it.update(data, offset, len)
-            buf.putU32(it.value.toUInt())
-        }
+        buf.putU32(crc32(data, offset, len))
         buf.put(data, offset, len)
 
         allocated += len + recordHeaderSize
