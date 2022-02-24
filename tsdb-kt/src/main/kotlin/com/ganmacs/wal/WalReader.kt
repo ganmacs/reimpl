@@ -31,6 +31,7 @@ internal class WalReader(
 ) : Iterator<ByteArray> {
     private val buffer = ByteBuffer.allocate(pageSize)
     private var ret: ByteArray? = null
+    private var total: Int = 0
 
     override fun hasNext(): Boolean {
         return try {
@@ -57,23 +58,24 @@ internal class WalReader(
         while (true) {
             buffer.clear()
 
-            reader.readExact(buffer.array(), 0, recordHeaderSize)
+            total += reader.readExact(buffer.array(), 0, recordHeaderSize)
 
             val walType = buffer.readWalType()
             if (walType == WalType.PageTerm) {
-                // consume remaining padding 0
-                reader.readAll(buffer.array(), 0)
+                // wal writes page per pageSize, so consume 1 page here
+                val len = pageSize - (total % pageSize)
 
+                // consume remaining padding 0
+                total += reader.readExact(buffer.array(), 0, len)
                 if (buffer.array().none { it == 0.toByte() }) {
                     throw error("padding includes 0. something invalid")
-
                 }
                 continue
             }
 
             val length = buffer.readLength()
             val checksum = buffer.readChecksum()
-            reader.readExact(buffer.array(), recordHeaderSize, length)
+            total += reader.readExact(buffer.array(), recordHeaderSize, length)
 
             val crc = CRC32()
             crc.update(buffer.array(), recordHeaderSize, length)

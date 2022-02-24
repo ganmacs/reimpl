@@ -1,10 +1,9 @@
 package com.ganmacs.wal
 
-import java.io.BufferedInputStream
+import SegmentBufReader
 import java.io.EOFException
-import java.io.FileInputStream
 import java.io.IOException
-import java.io.InputStream.nullInputStream
+import java.io.InputStream
 import java.nio.file.Path
 
 data class SegmentRange(
@@ -37,33 +36,28 @@ internal class SegmentList(
 class InvalidRecord(override val message: String?) : RuntimeException(message)
 
 internal class SegmentReader(
-    private val segments: SegmentList,
+    private val segments: InputStream,
 ) {
-    private var offset = 0
-    private var buffer: BufferedInputStream = BufferedInputStream(
-        segments.next()?.let { FileInputStream(it.absolutePath) } ?: nullInputStream(),
-        pageSize * 16
-    )
 
-    constructor(segments: List<Segment>) : this(SegmentList(segments))
+    constructor(segments: List<Segment>) : this(SegmentBufReader(segments))
 
-    fun readExact(b: ByteArray, off: Int, len: Int) {
+    fun readExact(b: ByteArray, off: Int, len: Int): Int {
         var r = 0
         while ((len - r) > 0) {
             val tt = read(b, off + r, len - r).getOrThrow()
             r += tt
         }
+
+        return r
     }
 
-    fun readAll(b: ByteArray, off: Int) {
-        val len = buffer.available()
-        if (b.size < len) throw error("size is too short. required $len but ${b.size}")
-        read(b, off, len).getOrThrow()
+    fun readFull(b: ByteArray, off: Int): Int {
+        return read(b, off, b.size).getOrThrow()
     }
 
     private fun read(b: ByteArray, off: Int, len: Int): Result<Int> {
         val rlen = try {
-            buffer.read(b, off, len)
+            segments.read(b, off, len)
         } catch (e: IOException) {
             return Result.failure(e)
         }
@@ -73,25 +67,15 @@ internal class SegmentReader(
                 return Result.failure(InvalidRecord("the data is insufficient expected len=$len, actual len=$rlen"))
             }
 
-            offset += rlen
             return Result.success(rlen)
+        } else {
+            return Result.failure(EOFException("segment reader reached EOF"))
         }
 
-        return segments.next()?.let {
-            offset = 0
-            buffer = BufferedInputStream(FileInputStream(it.absolutePath), pageSize * 16)
-
-            Result.success(0)
-        } ?: Result.failure(EOFException("segment reader reached EOF"))
     }
 
-    fun available(): Boolean {
-        println(buffer.available())
-        println(segments.hasNext())
-        return (buffer.available() > recordHeaderSize) || segments.hasNext()
-    }
+    fun available(): Boolean = segments.available() > recordHeaderSize
 
-    fun close() {
-        segments.forAllEach { it.close() }
-    }
+
+    fun close() = segments.close()
 }

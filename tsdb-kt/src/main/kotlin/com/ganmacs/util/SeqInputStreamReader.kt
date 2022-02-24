@@ -27,6 +27,15 @@ class SeqInputStreamReader(
         return t
     }
 
+    override fun available(): Int {
+        var avail: Int
+        while (true) {
+            avail = cur.available()
+            if (avail != 0) return avail
+            cur = iter.nextOrNull() ?: return 0
+        }
+    }
+
     override fun close() = inputStreams.forEach { it.close() }
 }
 
