@@ -1,40 +1,40 @@
-package com.ganmacs.wal
+package com.ganmacs.util
 
+import com.ganmacs.wal.EOF
 import java.io.InputStream
 
-class SeqInputStreamReader(
+internal class SeqInputStreamReader(
     private val inputStreams: List<InputStream>,
 ) : InputStream() {
     private val iter = inputStreams.iterator()
-    private var cur = iter.nextOrNull() ?: nullInputStream()
+    private var inputStream = iter.nextOrNull() ?: nullInputStream()
+
+    // expect that available() doesn't change while reading
+    private var totalAvailable = inputStreams.fold(0) { acc, e -> acc + e.available() }
 
     override fun read(b: ByteArray, off: Int, len: Int): Int {
-        var rlen = cur.read(b, off, len)
+        var rlen = inputStream.read(b, off, len)
         while (len > rlen) {
-            cur = iter.nextOrNull() ?: return rlen
-            rlen += cur.read(b, off + rlen, len - rlen)
-        }
+            inputStream = iter.nextOrNull() ?: break
+            rlen += inputStream.read(b, off + rlen, len - rlen)
 
+        }
+        totalAvailable -= rlen
         return rlen
     }
 
     override fun read(): Int {
-        var t = cur.read()
-        while (t == com.ganmacs.util.EOF) {
-            cur = iter.nextOrNull() ?: return com.ganmacs.util.EOF
-            t = cur.read()
+        var t = inputStream.read()
+        while (t == EOF) {
+            inputStream = iter.nextOrNull() ?: return EOF
+            t = inputStream.read()
         }
+
+        totalAvailable--
         return t
     }
 
-    override fun available(): Int {
-        var avail: Int
-        while (true) {
-            avail = cur.available()
-            if (avail != 0) return avail
-            cur = iter.nextOrNull() ?: return 0
-        }
-    }
+    override fun available(): Int = totalAvailable
 
     override fun close() = inputStreams.forEach { it.close() }
 }

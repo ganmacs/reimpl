@@ -1,6 +1,5 @@
 package com.ganmacs.util
 
-import com.ganmacs.wal.SeqInputStreamReader
 import org.junit.jupiter.api.Test
 import java.io.ByteArrayInputStream
 import kotlin.test.assertEquals
@@ -17,13 +16,13 @@ internal class SeqInputStreamReaderTest {
 
         val buf = ByteArray(20)
         var off = 0
-        assertEquals(7, seq.available())
+        assertEquals(13, seq.available())
 
         off += seq.read(buf, 0, 4)
         assertEquals(buf.take(4), "abcd".toByteArray().toList())
         assertEquals(4, off)
 
-        assertEquals(3, seq.available())
+        assertEquals(9, seq.available())
         off += seq.read(buf, off, 4)
         assertEquals(buf.take(8), "abcdefgh".toByteArray().toList())
         assertEquals(8, off)

@@ -1,10 +1,14 @@
 package com.ganmacs.wal
 
-import com.ganmacs.glog
 import com.google.common.io.ByteArrayDataOutput
 import com.google.common.io.ByteStreams
 import java.io.EOFException
+import java.io.InputStream
 import java.nio.ByteBuffer
+
+class InvalidRecord(override val message: String?) : RuntimeException(message)
+
+internal const val EOF: Int = -1
 
 private fun ByteBuffer.readU8(): UByte = this.get().toUByte()
 private fun ByteBuffer.readU16(): UShort = this.short.toUShort()
@@ -25,9 +29,7 @@ internal fun ByteBuffer.readChecksum(off: Int = 0): UInt {
     return readU32()
 }
 
-internal class WalReader(
-    private val reader: SegmentBufReader,
-) : Iterator<ByteArray> {
+internal class WalReader(private val reader: InputStream) : Iterator<ByteArray> {
     private val buffer = ByteBuffer.allocate(pageSize)
     private var ret: ByteArray? = null
     private var total: Int = 0
@@ -37,24 +39,19 @@ internal class WalReader(
             ret = ret ?: innerNext()
             true
         } catch (e: EOFException) {
-            glog.debug(e.toString())
             false
         }
     }
 
     override fun next(): ByteArray {
         if (!hasNext()) throw NoSuchElementException()
-
-        val record = ret!!
-        ret = null
-        return record
+        return (ret ?: innerNext()).also { ret = null }
     }
 
     private fun innerNext(): ByteArray {
         val out: ByteArrayDataOutput = ByteStreams.newDataOutput()
         while (true) {
             buffer.clear()
-
             total += reader.readExact(buffer.array(), 0, recordHeaderSize)
 
             val walType = buffer.readWalType()
@@ -64,8 +61,8 @@ internal class WalReader(
 
                 // consume remaining padding 0
                 total += reader.readExact(buffer.array(), 0, len)
-                if (buffer.array().none { it == 0.toByte() }) {
-                    throw error("padding includes 0. something invalid")
+                for (byte in buffer.array().take(len)) {
+                    if (byte != 0.toByte()) throw error("padding includes 0. something invalid $byte")
                 }
                 continue
             }
@@ -86,4 +83,11 @@ internal class WalReader(
         }
     }
 }
+
+private fun InputStream.readExact(b: ByteArray, off: Int, len: Int): Int =
+    when (val rlen = this.read(b, off, len)) {
+        len -> rlen
+        EOF -> throw EOFException("Segment Buf Reader reached EOF")
+        else -> throw InvalidRecord("invalid size: expected $len, got $rlen")
+    }
 

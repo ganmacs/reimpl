@@ -4,7 +4,6 @@ import com.ganmacs.glog
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
-import java.io.InputStream
 import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.name
@@ -14,15 +13,9 @@ internal class SegmentRef(
     val index: Int,
 )
 
-internal class ReadOnlySegment(private val inner: File) : InputStream() {
-    init {
-        inner.setReadOnly()
     }
 
-    private val input by lazy { FileInputStream(inner) }
-    override fun read(b: ByteArray, off: Int, len: Int): Int = input.read(b, off, len)
-    override fun read(): Int = input.read()
-}
+internal typealias ReadSegment = FileInputStream
 
 internal class Segment(
     private val inner: File,
@@ -37,11 +30,9 @@ internal class Segment(
 
     private val outputStream by lazy { FileOutputStream(inner, true) }
 
-    val absolutePath: String = inner.absolutePath.toString()
-
     fun length(): Int = inner.length().toInt() // TODO: check
 
-    fun readOnly(): ReadOnlySegment = ReadOnlySegment(inner)
+    fun forRead(): ReadSegment = ReadSegment(inner)
 
     fun write(b: ByteArray, off: Int, len: Int) {
         outputStream.write(b, off, len)
