@@ -10,18 +10,18 @@ private fun ByteBuffer.readU8(): UByte = this.get().toUByte()
 private fun ByteBuffer.readU16(): UShort = this.short.toUShort()
 private fun ByteBuffer.readU32(): UInt = this.int.toUInt()
 
-private fun ByteBuffer.readWalType(): WalType {
-    this.position(0)
+internal fun ByteBuffer.readWalType(off: Int = 0): WalType {
+    this.position(0 + off)
     return WalType.fromInt(readU8().toInt())
 }
 
-private fun ByteBuffer.readLength(): Int {
-    this.position(1) // skip wal type
+internal fun ByteBuffer.readLength(off: Int = 0): Int {
+    this.position(1 + off) // skip wal type
     return readU16().toInt()
 }
 
-private fun ByteBuffer.readChecksum(): UInt {
-    this.position(3) // skip wal type(1) + length(2)
+internal fun ByteBuffer.readChecksum(off: Int = 0): UInt {
+    this.position(3 + off) // skip wal type(1) + length(2)
     return readU32()
 }
 
