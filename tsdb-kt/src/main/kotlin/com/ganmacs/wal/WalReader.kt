@@ -43,9 +43,7 @@ internal class WalReader(
     }
 
     override fun next(): ByteArray {
-        if (!hasNext()) {
-            throw error("already EOF")
-        }
+        if (!hasNext()) throw NoSuchElementException()
 
         val record = ret!!
         ret = null
