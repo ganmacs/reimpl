@@ -1,9 +1,10 @@
 package com.ganmacs.wal
 
 import org.slf4j.Logger
-import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
+import kotlin.io.path.deleteExisting
+import kotlin.io.path.deleteIfExists
 import kotlin.math.min
 
 internal const val pageSize = 32 * 1024                   // 32KB
@@ -61,6 +62,16 @@ class Wal(
         segment.fsync()
         segment.close()
         closed = true
+    }
+
+    fun truncate(i: Int) {
+        for (seg in listSegments(dir)) {
+            if (seg.index >= i) continue
+
+            val p = dir.resolve(seg.name)
+            p.deleteExisting()
+            logger.info("deleted segment $p")
+        }
     }
 
     fun log(bufs: List<ByteArray>) {

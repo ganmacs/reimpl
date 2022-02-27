@@ -38,6 +38,34 @@ internal class WalReaderTest {
     }
 
     @Test
+    fun `empty segment`() {
+        Segment.create(tmpDir, 0)
+        val reader = WalReader(createSegmentReader(tmpDir))
+        assertEquals(false, reader.hasNext())
+    }
+
+    @Test
+    fun `reads single row`() {
+        val wal = Wal(logger = logger, dir = tmpDir, segmentSize = pageSize)
+        wal.log(listOf(message).map { it.toByteArray() })
+        wal.close()
+
+        assertEquals(1, listSegments(tmpDir).size)
+
+        for (s in listSegments(tmpDir)) {
+            val t = tmpDir.resolve(s.name)
+            println(t)
+            println(Files.size(t))
+        }
+
+        val reader = WalReader(createSegmentReader(tmpDir))
+        val expected = message.toByteArray().toList()
+        assertEquals(true, reader.hasNext())
+        assertEquals(expected, reader.next().toList())
+        assertEquals(false, reader.hasNext())
+    }
+
+    @Test
     fun `reads single segment`() {
         val wal = Wal(logger = logger, dir = tmpDir, segmentSize = pageSize)
         wal.log(listOf(message, message).map { it.toByteArray() })
