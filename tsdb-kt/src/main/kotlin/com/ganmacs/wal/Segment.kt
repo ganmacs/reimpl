@@ -2,7 +2,6 @@ package com.ganmacs.wal
 
 import com.ganmacs.glog
 import java.io.File
-import java.io.FileInputStream
 import java.io.FileOutputStream
 import java.nio.file.Files
 import java.nio.file.Path
@@ -12,10 +11,6 @@ internal class SegmentRef(
     val name: String,
     val index: Int,
 )
-
-    }
-
-internal typealias ReadSegment = FileInputStream
 
 internal class Segment(
     private val inner: File,
@@ -31,8 +26,6 @@ internal class Segment(
     private val outputStream by lazy { FileOutputStream(inner, true) }
 
     fun length(): Int = inner.length().toInt() // TODO: check
-
-    fun forRead(): ReadSegment = ReadSegment(inner)
 
     fun write(b: ByteArray, off: Int, len: Int) {
         outputStream.write(b, off, len)

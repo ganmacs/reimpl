@@ -1,14 +1,19 @@
 package com.ganmacs.wal
 
+import com.ganmacs.util.SeqInputStreamReader
 import mu.KotlinLogging
 import org.junit.jupiter.api.AfterEach
 import org.junit.jupiter.api.BeforeEach
 import org.junit.jupiter.api.Test
+import java.io.BufferedInputStream
 import java.io.File
+import java.io.FileInputStream
 import java.io.IOException
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
+import kotlin.io.path.Path
+import kotlin.io.path.absolutePathString
 import kotlin.test.assertEquals
 
 internal class WalReaderTest {
@@ -38,7 +43,9 @@ internal class WalReaderTest {
         wal.log(listOf(message, message).map { it.toByteArray() })
         wal.close()
 
-        val reader = WalReader(SegmentBufReader(listOf(Segment.create(tmpDir, 0))))
+        assertEquals(1, listSegments(tmpDir).size)
+
+        val reader = WalReader(createSegmentReader(tmpDir))
         val expected = message.toByteArray().toList()
         assertEquals(true, reader.hasNext())
         assertEquals(expected, reader.next().toList())
@@ -58,7 +65,9 @@ internal class WalReaderTest {
         wal.log(listOf(message).map { it.toByteArray() })
         wal.close()
 
-        val reader = WalReader(SegmentBufReader(listOf(Segment.create(tmpDir, 0))))
+        assertEquals(1, listSegments(tmpDir).size)
+
+        val reader = WalReader(createSegmentReader(tmpDir))
         val expected = message.toByteArray().toList()
         assertEquals(true, reader.hasNext())
         assertEquals(expected.size, reader.next().size)
@@ -77,13 +86,22 @@ internal class WalReaderTest {
         wal.log(listOf(message, message).map { it.toByteArray() })
         wal.close()
 
-        val segments = listOf(Segment.create(tmpDir, 0), Segment.create(tmpDir, 1))
-        val reader = WalReader(SegmentBufReader(segments))
+        assertEquals(2, listSegments(tmpDir).size)
+
+        val reader = WalReader(createSegmentReader(tmpDir))
         val expected = message.toByteArray().toList()
         assertEquals(expected, reader.next().toList())
         assertEquals(expected, reader.next().toList())
         assertEquals(expected, reader.next().toList())
         assertEquals(expected, reader.next().toList())
         assertEquals(false, reader.hasNext())
+    }
+
+    private fun createSegmentReader(dir: Path): SegmentBufReader {
+        val ins = listSegments(tmpDir).map {
+            val path = Path(dir.absolutePathString(), it.name).absolutePathString()
+            FileInputStream(File(path))
+        }
+        return BufferedInputStream(SeqInputStreamReader(ins), pageSize * 16)
     }
 }
