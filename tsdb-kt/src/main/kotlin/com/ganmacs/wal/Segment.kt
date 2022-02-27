@@ -7,7 +7,7 @@ import java.nio.file.Files
 import java.nio.file.Path
 import kotlin.io.path.name
 
-internal class SegmentRef(
+internal data class SegmentRef(
     val name: String,
     val index: Int,
 )
@@ -19,6 +19,8 @@ internal class Segment(
     companion object {
         fun create(dir: Path, index: Int): Segment {
             val file = File(dir.toString(), segmentFileName(index))
+            Files.createFile(file.toPath())
+
             return Segment(file, index)
         }
     }
