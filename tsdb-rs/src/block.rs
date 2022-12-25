@@ -1,6 +1,13 @@
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::{fs::File, io::BufReader, os::unix::prelude::MetadataExt, path::Path};
+use std::{
+    fs::File,
+    io::BufReader,
+    os::unix::prelude::MetadataExt,
+    path::{Path, PathBuf},
+};
+
+use crate::chunks::{self, ChunkReader};
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct BlockStats {
@@ -33,23 +40,27 @@ struct BlockMeta {
     version: u64,
 }
 
-struct Block {
+// struct Block<CR: ChunkReader> {
+struct Block<CR: ChunkReader> {
     dir: String,
     meta: BlockMeta,
     num_byte_meta: u64,
+    chunk_reader: CR,
 }
 
-fn open(dir: String) -> anyhow::Result<Block> {
-    let (meta, meta_size) = read_meta_file(&dir)?;
+fn open(dir: String) -> anyhow::Result<Block<chunks::Reader>> {
+    let (meta, num_byte_meta) = read_meta_file(&dir)?;
+    let chunk_reader = chunks::Reader::build(PathBuf::from(&dir))?;
 
     Ok(Block {
         dir: dir.clone(),
-        meta: meta,
-        num_byte_meta: meta_size,
+        meta,
+        num_byte_meta,
+        chunk_reader,
     })
 }
 
-const META_FILE_NAME: &'static str = "meta.json";
+const META_FILE_NAME: &str = "meta.json";
 const META_VERSION1: u64 = 1;
 
 fn read_meta_file(dir: &str) -> Result<(BlockMeta, u64)> {
@@ -63,7 +74,6 @@ fn read_meta_file(dir: &str) -> Result<(BlockMeta, u64)> {
     if meta.version != META_VERSION1 {
         return Err(anyhow!("unexpected meta file version {:?}", meta.version));
     }
-
 
     Ok((meta, size))
 }
