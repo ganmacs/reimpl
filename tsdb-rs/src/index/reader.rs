@@ -1,23 +1,33 @@
 use super::error::IndexError as IndexHeaderError;
-use super::{
-    super::seek_byte::SeekReadBytesExt, FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN,
-    MAGIC_INDEX,
-};
+use super::{FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN, MAGIC_INDEX};
+use crate::seek_byte::SeekReadBytesExt;
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use integer_encoding::VarIntReader;
-use std::fs::File;
-use std::io::{self, Read, Seek, SeekFrom};
-use std::path::Path;
+use std::{
+    collections::HashMap,
+    fs::File,
+    io::{self, Read, Seek, SeekFrom},
+    ops::FnMut,
+    path::Path,
+    str,
+};
 
 const INDEX_FILE_NAME: &str = "index";
 
 const CRC32_TABLE: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
 
+#[derive(Debug, PartialEq)]
+struct PostingOffset {
+    value: String,
+    off: u64,
+}
+
 pub struct Reader {
     inner: File,
     toc: Toc,
     symbols: Symbols,
+    postings: HashMap<String, Vec<PostingOffset>>,
 }
 
 impl Reader {
@@ -35,17 +45,24 @@ impl Reader {
 
         let version = file.read_u8().map_err(|e| anyhow!(e))?;
         ensure!(
-            version == FORMAT_V1 ||  version == FORMAT_V2,
+            version == FORMAT_V1 || version == FORMAT_V2,
             IndexHeaderError::InvalidIndexVersion(version)
         );
 
         let toc = new_toc(&mut file)?;
         let symbols = new_symbols(&mut file, toc.symbols)?;
+        let postings = if version == FORMAT_V1 {
+            // TODO
+            HashMap::new()
+        } else {
+            new_postings_offset_table_format_v2(&mut file, toc.postings_table)?
+        };
 
         Ok(Reader {
             inner: file,
             toc,
             symbols,
+            postings,
         })
     }
 }
@@ -97,6 +114,106 @@ trait VarUintByte: VarIntReader + Read {
 
 impl<R: VarIntReader + io::Read> VarUintByte for R {}
 
+fn new_postings_offset_table_format_v2(
+    file: &mut File,
+    postings_offset: u64,
+) -> Result<HashMap<String, Vec<PostingOffset>>> {
+    let mut postings: HashMap<String, Vec<PostingOffset>> = HashMap::new();
+
+    // last name, last value,last_off
+    let mut prev_value: Option<(Vec<u8>, Vec<u8>, u64)> = None;
+    let mut value_count = 0;
+
+    new_postings_offset_table(
+        file,
+        postings_offset,
+        // name are sorted
+        |name: Vec<u8>, value: Vec<u8>, _: u64, off: u64, end: bool| {
+            let name_str = to_string(&name)?;
+
+            if end {
+                return store_value(&mut postings, &mut prev_value);
+            }
+
+            if !postings.contains_key(&name_str) {
+                postings.insert(name_str.clone(), vec![]);
+                store_value(&mut postings, &mut prev_value)?;
+                value_count = 0;
+            }
+
+            if value_count % SYMBOL_FACTOR == 0 {
+                let value = to_string(&value)?;
+
+                postings
+                    .get_mut(&name_str)
+                    .map(|v| v.push(PostingOffset { value, off }))
+                    .ok_or(anyhow!("invalid postings"))?;
+                prev_value = None;
+            } else {
+                prev_value = Some((name, value, off));
+            }
+            value_count += 1;
+
+            return Ok(());
+        },
+    )?;
+
+    return Ok(postings);
+}
+
+fn to_string<T: AsRef<[u8]>>(buf: T) -> Result<String> {
+    str::from_utf8(buf.as_ref())
+        .map(|v| v.to_string())
+        .map_err(|e| anyhow!(e))
+}
+
+fn store_value(
+    postings: &mut HashMap<String, Vec<PostingOffset>>,
+    value: &mut Option<(Vec<u8>, Vec<u8>, u64)>,
+) -> Result<()> {
+    if let Some((l_name, l_value, l_off)) = value.take() {
+        let value = to_string(&l_value)?;
+        postings
+            .get_mut(&to_string(&l_name)?)
+            .map(|v| v.push(PostingOffset { value, off: l_off }))
+            .ok_or(anyhow!("invalid postings table"))?;
+    }
+
+    Ok(())
+}
+
+fn new_postings_offset_table(
+    file: &mut File,
+    offset: u64,
+    mut f: impl FnMut(Vec<u8>, Vec<u8>, u64, u64, bool) -> Result<()>,
+) -> Result<()> {
+    let buf = new_decbuf_at(file, offset, Some(CRC32_TABLE))?;
+    let mut content = io::Cursor::new(&buf);
+    let start = content.position();
+    let count = content.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
+
+    for _ in 0..count {
+        let label_offset = content.position() - start;
+        let key_count = content.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+        ensure!(
+            key_count == 2,
+            "unexpected number of keys for postings offset table {:0}",
+            key_count
+        );
+
+        let name = content.read_varint_bytes().map_err(|e| anyhow!(e))?;
+        let value = content.read_varint_bytes().map_err(|e| anyhow!(e))?;
+        let offset = content.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+
+        f(name, value, offset, label_offset, false)?;
+    }
+
+    // sentinel node
+    f(vec![], vec![], 0, 0, true)?;
+
+    Ok(())
+}
+
 // expect the following binary format
 // byte len(4b) | content | (checksum(4b))?
 fn new_decbuf_at(
@@ -141,7 +258,7 @@ struct Toc {
     lable_indeices: u64,
     label_indices_table: u64,
     postings: u64,
-    posting_stable: u64,
+    postings_table: u64,
 }
 
 fn new_toc(file: &mut File) -> Result<Toc> {
@@ -172,7 +289,7 @@ fn new_toc(file: &mut File) -> Result<Toc> {
         lable_indeices: buf.read_u64::<BigEndian>().map_err(|e| anyhow!(e))?,
         label_indices_table: buf.read_u64::<BigEndian>().map_err(|e| anyhow!(e))?,
         postings: buf.read_u64::<BigEndian>().map_err(|e| anyhow!(e))?,
-        posting_stable: buf.read_u64::<BigEndian>().map_err(|e| anyhow!(e))?,
+        postings_table: buf.read_u64::<BigEndian>().map_err(|e| anyhow!(e))?,
     })
 }
 
@@ -188,9 +305,42 @@ mod tests {
 
     #[test]
     fn test_reader() {
-        let path = Path::new("tests/index_format_v1").join(INDEX_FILE_NAME);
-        let _ = Reader::build(path).unwrap();
-        // TODO
+        let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
+        let reader = Reader::build(path).unwrap();
+        let mut r = reader.postings.into_iter().collect::<Vec<_>>();
+        r.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            vec![
+                (
+                    "".to_string(),
+                    vec![PostingOffset {
+                        value: "".to_string(),
+                        off: 4
+                    }]
+                ),
+                (
+                    "a".to_string(),
+                    vec![PostingOffset {
+                        value: "1".to_string(),
+                        off: 9
+                    }]
+                ),
+                (
+                    "b".to_string(),
+                    vec![
+                        PostingOffset {
+                            value: "1".to_string(),
+                            off: 16
+                        },
+                        PostingOffset {
+                            value: "4".to_string(),
+                            off: 37
+                        }
+                    ]
+                )
+            ],
+            r,
+        );
     }
 
     #[test]
@@ -207,7 +357,7 @@ mod tests {
                 lable_indeices: 1806,
                 label_indices_table: 4300,
                 postings: 2248,
-                posting_stable: 4326,
+                postings_table: 4326,
             },
             toc,
         )
