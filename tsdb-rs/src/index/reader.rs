@@ -5,6 +5,7 @@ use super::{
 };
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
+use integer_encoding::VarIntReader;
 use std::fs::File;
 use std::io::{self, Read, Seek, SeekFrom};
 use std::path::Path;
@@ -16,6 +17,7 @@ const CRC32_TABLE: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
 pub struct Reader {
     inner: File,
     toc: Toc,
+    symbols: Symbols,
 }
 
 impl Reader {
@@ -38,9 +40,98 @@ impl Reader {
         );
 
         let toc = new_toc(&mut file)?;
+        let symbols = new_symbols(&mut file, toc.symbols)?;
 
-        Ok(Reader { inner: file, toc })
+        Ok(Reader {
+            inner: file,
+            toc,
+            symbols,
+        })
     }
+}
+
+const SYMBOL_FACTOR: usize = 32;
+
+#[derive(Debug, PartialEq)]
+pub struct Symbols {
+    inner: Vec<u8>,
+    off: u64,
+
+    offsets: Vec<u64>,
+    seen: u64,
+}
+
+fn new_symbols(file: &mut File, offset: u64) -> Result<Symbols> {
+    let buf = new_decbuf_at(file, offset, Some(CRC32_TABLE))?;
+    let mut content = io::Cursor::new(&buf);
+    let count = content.read_u32::<BigEndian>().map_err(|e| anyhow!(e))? as usize;
+
+    let mut offsets = vec![];
+    let mut seen = 0;
+    while seen < count {
+        if seen % SYMBOL_FACTOR == 0 {
+            // skip len
+            offsets.push(content.position() + offset + 4);
+        }
+        // consume position
+        let _ = content.read_varint_bytes().map_err(|e| anyhow!(e))?;
+        seen += 1;
+    }
+
+    Ok(Symbols {
+        inner: buf,
+        off: offset,
+        offsets,
+        seen: seen as u64,
+    })
+}
+
+trait VarUintByte: VarIntReader + Read {
+    fn read_varint_bytes(&mut self) -> io::Result<Vec<u8>> {
+        let size = self.read_varint::<u64>()? as usize;
+        let mut buf = vec![0; size];
+        self.read_exact(&mut buf)?;
+        return Ok(buf);
+    }
+}
+
+impl<R: VarIntReader + io::Read> VarUintByte for R {}
+
+// expect the following binary format
+// byte len(4b) | content | (checksum(4b))?
+fn new_decbuf_at(
+    file: &mut File,
+    offset: u64,
+    crc32_table: Option<crc::Crc<u32>>,
+) -> Result<Vec<u8>> {
+    let size = file.metadata().map_err(|e| anyhow!(e))?.len();
+    ensure!(
+        offset + 4 < size,
+        IndexHeaderError::InvalidBufSize(offset + 4, size)
+    );
+
+    let len = file
+        .read_u32_at::<BigEndian>(offset)
+        .map_err(|e| anyhow!(e))?;
+    ensure!(
+        // TODO: 4 is not needed when crc32 is not given.
+        offset + 4 + (len as u64) + 4 < size,
+        IndexHeaderError::InvalidBufSize(offset + 4, size)
+    );
+
+    let mut buf = vec![0; len as usize];
+    file.read_exact(&mut buf).map_err(|e| anyhow!(e))?;
+
+    if let Some(crc32) = crc32_table {
+        let expected_crc = file.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
+        let actual = crc32.checksum(&buf);
+        ensure!(
+            actual == expected_crc,
+            IndexHeaderError::InvalidChucksum(expected_crc, actual)
+        );
+    }
+
+    Ok(buf)
 }
 
 #[derive(Debug, PartialEq)]
@@ -113,5 +204,19 @@ mod tests {
             },
             toc,
         )
+    }
+
+    #[test]
+    fn test_new_symbols() {
+        init();
+
+        let path = Path::new("tests/index_format_v1").join(INDEX_FILE_NAME);
+        let mut file = File::open(path).unwrap();
+        let toc = new_toc(&mut file).unwrap();
+
+        let symbols = new_symbols(&mut file, toc.symbols).unwrap();
+        assert_eq!(5, symbols.off);
+        assert_eq!(104, symbols.seen);
+        assert_eq!(vec![13, 105, 198, 291], symbols.offsets);
     }
 }

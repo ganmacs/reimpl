@@ -1,5 +1,4 @@
 use byteorder::ReadBytesExt;
-use std::fs::File;
 use std::io::{self, Seek, SeekFrom};
 
 pub trait SeekReadBytesExt: io::Read + Seek {
@@ -28,6 +27,4 @@ pub trait SeekReadBytesExt: io::Read + Seek {
     }
 }
 
-impl SeekReadBytesExt for File {}
-impl SeekReadBytesExt for &File {}
-impl<T> SeekReadBytesExt for io::Cursor<T> where T: AsRef<[u8]> {}
+impl<R: io::Read + Seek> SeekReadBytesExt for R {}
