@@ -25,17 +25,17 @@ impl Reader {
         let mut file = File::open(dir).map_err(|e| anyhow!(e))?;
 
         let size = file.metadata().map_err(|e| anyhow!(e))?.len();
-        ensure!(HEADER_LEN > size, IndexHeaderError::InvalidSize(size));
+        ensure!(HEADER_LEN < size, IndexHeaderError::InvalidSize(size));
 
         let magic_index = file.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
         ensure!(
-            magic_index != MAGIC_INDEX,
+            magic_index == MAGIC_INDEX,
             IndexHeaderError::InvalidMagicNumber(magic_index)
         );
 
         let version = file.read_u8().map_err(|e| anyhow!(e))?;
         ensure!(
-            version != FORMAT_V1 && version != FORMAT_V2,
+            version == FORMAT_V1 ||  version == FORMAT_V2,
             IndexHeaderError::InvalidIndexVersion(version)
         );
 
@@ -184,6 +184,13 @@ mod tests {
     fn init() {
         let env = Env::default().default_filter_or("debug");
         let _ = env_logger::Builder::from_env(env).is_test(true).try_init();
+    }
+
+    #[test]
+    fn test_reader() {
+        let path = Path::new("tests/index_format_v1").join(INDEX_FILE_NAME);
+        let _ = Reader::build(path).unwrap();
+        // TODO
     }
 
     #[test]

@@ -3,7 +3,7 @@ use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum IndexError {
-    #[error("invalid index header (expected {}, got {0:?})", HEADER_LEN)]
+    #[error("invalid index header size (expected {}, got {0:?})", HEADER_LEN)]
     InvalidSize(u64),
     #[error("invalid index magic number (expected {:#x}, got {0:?})", MAGIC_INDEX)]
     InvalidMagicNumber(u32),
