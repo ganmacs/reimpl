@@ -1,3 +1,4 @@
+use crate::index;
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -40,23 +41,25 @@ struct BlockMeta {
     version: u64,
 }
 
-// struct Block<CR: ChunkReader> {
-struct Block<CR: ChunkReader> {
+pub struct Block<CR: ChunkReader> {
     dir: String,
     meta: BlockMeta,
     num_byte_meta: u64,
     chunk_reader: CR,
+    index_reader: index::Reader,
 }
 
-fn open(dir: String) -> anyhow::Result<Block<chunks::Reader>> {
+pub(crate) fn open(dir: String) -> anyhow::Result<Block<chunks::Reader>> {
     let (meta, num_byte_meta) = read_meta_file(&dir)?;
     let chunk_reader = chunks::Reader::build(PathBuf::from(&dir))?;
+    let index_reader = index::Reader::build(&dir)?;
 
     Ok(Block {
-        dir: dir.clone(),
+        dir,
         meta,
         num_byte_meta,
         chunk_reader,
+        index_reader,
     })
 }
 

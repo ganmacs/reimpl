@@ -1,4 +1,4 @@
-use anyhow::{anyhow, Result, ensure};
+use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use std::fs::{self, File};
 use std::os::unix::prelude::MetadataExt;
