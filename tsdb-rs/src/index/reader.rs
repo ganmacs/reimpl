@@ -28,6 +28,7 @@ pub struct Reader {
     toc: Toc,
     symbols: Symbols,
     postings: HashMap<String, Vec<PostingOffset>>,
+    name_symbols: HashMap<u64, String>,
 }
 
 impl Reader {
@@ -58,11 +59,24 @@ impl Reader {
             new_postings_offset_table_format_v2(&mut file, toc.postings_table)?
         };
 
+        let mut name_symbols: HashMap<u64, String> = HashMap::new();
+        for k in postings.keys() {
+            if k == "" {
+                continue;
+            }
+
+            let off = symbols
+                .reverse_lookup(k)
+                .map_err(|e| anyhow!("reverse symbol lookup {:?}", e))?;
+            name_symbols.insert(off, k.to_string());
+        }
+
         Ok(Reader {
             inner: file,
             toc,
             symbols,
             postings,
+            name_symbols,
         })
     }
 }
@@ -78,6 +92,46 @@ pub struct Symbols {
     seen: u64,
 }
 
+impl Symbols {
+    fn reverse_lookup(&self, sym: &str) -> Result<u64> {
+        if self.offsets.len() == 0 {
+            return Err(anyhow!("unknown symobl {:?} - no symbols", sym));
+        }
+        let mut cur = io::Cursor::new(&self.inner);
+        let i = self
+            .offsets
+            .binary_search_by(|off| {
+                cur.seek(SeekFrom::Start(*off)).unwrap();
+                let v = cur.read_varint_bytes().unwrap();
+                let s = str::from_utf8(v.as_ref()).unwrap();
+
+                s.cmp(sym)
+            })
+            .unwrap_or_else(|v| v);
+        let i = if i > 0 { i - 1 } else { i };
+
+        let mut res = (i * SYMBOL_FACTOR) as u64;
+
+        cur.seek(SeekFrom::Start(self.offsets[i]))
+            .map_err(|v| anyhow!(v))?;
+
+        while res < self.seen {
+            let last_symbol = cur.read_varint_bytes().map_err(|v| anyhow!(v))?;
+            let s = str::from_utf8(last_symbol.as_ref()).map_err(|v| anyhow!(v))?;
+
+            if s == sym {
+                return Ok(res);
+            } else if s > sym {
+                return Err(anyhow!("Not found: key {:?}", sym));
+            }
+
+            res += 1
+        }
+
+        Err(anyhow!("Not found: key {:?}", sym))
+    }
+}
+
 fn new_symbols(file: &mut File, offset: u64) -> Result<Symbols> {
     let buf = new_decbuf_at(file, offset, Some(CRC32_TABLE))?;
     let mut content = io::Cursor::new(&buf);
@@ -88,7 +142,7 @@ fn new_symbols(file: &mut File, offset: u64) -> Result<Symbols> {
     while seen < count {
         if seen % SYMBOL_FACTOR == 0 {
             // skip len
-            offsets.push(content.position() + offset + 4);
+            offsets.push(content.position());
         }
         // consume position
         let _ = content.read_varint_bytes().map_err(|e| anyhow!(e))?;
@@ -341,6 +395,13 @@ mod tests {
             ],
             r,
         );
+
+        let mut name_symbols = reader.name_symbols.into_iter().collect::<Vec<_>>();
+        name_symbols.sort_by(|a, b| a.0.cmp(&b.0));
+        assert_eq!(
+            vec![(4, "a".to_string()), (5, "b".to_string()),],
+            name_symbols,
+        )
     }
 
     #[test]
@@ -374,6 +435,19 @@ mod tests {
         let symbols = new_symbols(&mut file, toc.symbols).unwrap();
         assert_eq!(5, symbols.off);
         assert_eq!(104, symbols.seen);
-        assert_eq!(vec![13, 105, 198, 291], symbols.offsets);
+        assert_eq!(vec![4, 96, 189, 282], symbols.offsets);
+    }
+
+    #[test]
+    fn test_symbol_reverse_lookup() {
+        let sym = Symbols {
+            inner: vec![0, 0, 0, 6, 1, 49, 1, 50, 1, 51, 1, 52, 1, 97, 1, 98],
+            off: 5,
+            offsets: vec![4],
+            seen: 6,
+        };
+
+        assert_eq!(4, sym.reverse_lookup(&("a".to_string())).unwrap());
+        assert_eq!(5, sym.reverse_lookup(&("b".to_string())).unwrap());
     }
 }
