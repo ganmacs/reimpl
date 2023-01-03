@@ -36,15 +36,19 @@ impl Reader {
 
             // verify magic chunk
             let magic_chunk = f.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
-            if magic_chunk != MAGIC_CHUNK {
-                return Err(anyhow!("invalid magic number {:#}", magic_chunk));
-            }
+            ensure!(
+                magic_chunk == MAGIC_CHUNK,
+                "invalid magic number {:#}",
+                magic_chunk
+            );
 
             // verify chunk format version
             let version = f.read_u8().map_err(|e| anyhow!(e))?;
-            if version != CHUNKS_FORMAT_V1 {
-                return Err(anyhow!("invalid chunks version {:?}", version));
-            }
+            ensure!(
+                version == CHUNKS_FORMAT_V1,
+                "invalid chunks version {:?}",
+                version
+            );
 
             total_size += size;
             open_files.push(f);
