@@ -4,12 +4,8 @@ use crate::{
 };
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
-use std::{
-    fs::File,
-    io::BufReader,
-    os::unix::prelude::MetadataExt,
-    path::{Path, PathBuf},
-};
+use std::path::{Path, PathBuf};
+use std::{fs::File, io::BufReader};
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct BlockStats {
@@ -43,20 +39,20 @@ struct BlockMeta {
 }
 
 pub struct Block<CR: ChunkReader> {
-    dir: String,
+    dir: PathBuf,
     meta: BlockMeta,
     num_byte_meta: u64,
     chunk_reader: CR,
     index_reader: index::Reader,
 }
 
-pub(crate) fn open(dir: String) -> anyhow::Result<Block<chunks::Reader>> {
-    let (meta, num_byte_meta) = read_meta_file(&dir)?;
-    let chunk_reader = chunks::Reader::build(PathBuf::from(&dir))?;
-    let index_reader = index::Reader::build(&dir)?;
+pub(crate) fn open<P: AsRef<Path>>(p: &P) -> anyhow::Result<Block<chunks::Reader>> {
+    let (meta, num_byte_meta) = read_meta_file(p)?;
+    let chunk_reader = chunks::Reader::build(p)?;
+    let index_reader = index::Reader::build(p)?;
 
     Ok(Block {
-        dir,
+        dir: PathBuf::from(p.as_ref()),
         meta,
         num_byte_meta,
         chunk_reader,
@@ -67,12 +63,10 @@ pub(crate) fn open(dir: String) -> anyhow::Result<Block<chunks::Reader>> {
 const META_FILE_NAME: &str = "meta.json";
 const META_VERSION1: u64 = 1;
 
-fn read_meta_file(dir: &str) -> Result<(BlockMeta, u64)> {
-    log::debug!("reading meta file in {}", dir);
-
-    let meta_path = Path::new(dir).join(META_FILE_NAME);
+fn read_meta_file<P: AsRef<Path>>(dir: P) -> Result<(BlockMeta, u64)> {
+    let meta_path = dir.as_ref().join(META_FILE_NAME);
     let b = File::open(meta_path).map_err(|e| anyhow!(e))?;
-    let size = b.metadata().map(|v| v.size()).map_err(|e| anyhow!(e))?;
+    let size = b.metadata().map(|v| v.len()).map_err(|e| anyhow!(e))?;
 
     let meta: BlockMeta = serde_json::from_reader(BufReader::new(b)).map_err(|e| anyhow!(e))?;
     if meta.version != META_VERSION1 {

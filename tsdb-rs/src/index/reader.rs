@@ -78,7 +78,7 @@ pub struct Reader {
 type SeriesRef = u64;
 
 impl Reader {
-    pub fn build<P: AsRef<Path>>(dir: P) -> Result<Reader> {
+    pub fn build<P: AsRef<Path>>(dir: &P) -> Result<Reader> {
         let mut file = File::open(dir).map_err(|e| anyhow!(e))?;
 
         let size = file.metadata().map_err(|e| anyhow!(e))?.len();
@@ -479,7 +479,7 @@ mod tests {
     #[test]
     fn test_reader() {
         let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
-        let reader = Reader::build(path).unwrap();
+        let reader = Reader::build(&path).unwrap();
         let mut r = reader.postings.into_iter().collect::<Vec<_>>();
         r.sort_by(|a, b| a.0.cmp(&b.0));
         assert_eq!(
@@ -526,7 +526,7 @@ mod tests {
     #[test]
     fn test_reader_postings() {
         let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
-        let mut reader = Reader::build(path).unwrap();
+        let mut reader = Reader::build(&path).unwrap();
 
         let series = vec![
             Labels::from_string(vec!["a", "1", "b", "1"]).unwrap(),
@@ -550,7 +550,7 @@ mod tests {
         init();
 
         let path = Path::new("tests/index_format_v1").join(INDEX_FILE_NAME);
-        let mut file = File::open(path).unwrap();
+        let mut file = File::open(&path).unwrap();
         let toc = new_toc(&mut file).unwrap();
         assert_eq!(
             Toc {
@@ -565,7 +565,7 @@ mod tests {
         );
 
         let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
-        let mut file = File::open(path).unwrap();
+        let mut file = File::open(&path).unwrap();
         let toc = new_toc(&mut file).unwrap();
         assert_eq!(
             Toc {
@@ -585,7 +585,7 @@ mod tests {
         init();
 
         let path = Path::new("tests/index_format_v1").join(INDEX_FILE_NAME);
-        let mut file = File::open(path).unwrap();
+        let mut file = File::open(&path).unwrap();
         let toc = new_toc(&mut file).unwrap();
 
         let symbols = symbols::new(&mut file, FORMAT_V2, toc.symbols).unwrap();

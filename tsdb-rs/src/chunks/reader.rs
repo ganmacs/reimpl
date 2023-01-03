@@ -1,7 +1,6 @@
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use std::fs::{self, File};
-use std::os::unix::prelude::MetadataExt;
 use std::path::{Path, PathBuf};
 
 use super::ChunkReader;
@@ -20,13 +19,13 @@ const SEGMENT_HEADER_SIZE: u64 =
     MAGIC_CHUNK_SIZE + CHUNKS_FOMRAT_VERSION_SIZE + SEGMENT_HEADER_PADING_SIZE;
 
 impl Reader {
-    pub fn build<P: AsRef<Path>>(dir: P) -> Result<Reader> {
+    pub fn build<P: AsRef<Path>>(dir: &P) -> Result<Reader> {
         let mut open_files = vec![];
         let mut total_size = 0;
 
         for file in sequence_files(dir)? {
             let mut f = File::open(file).map_err(|e| anyhow!(e))?;
-            let size = f.metadata().map_err(|e| anyhow!(e))?.size();
+            let size = f.metadata().map_err(|e| anyhow!(e))?.len();
 
             if size < SEGMENT_HEADER_PADING_SIZE {
                 return Err(anyhow!(
@@ -100,7 +99,7 @@ mod tests {
     fn test_reader_new() {
         init();
         let path = Path::new("tests/index_format_v1/chunks");
-        assert_eq!(1844, Reader::build(path).unwrap().size)
+        assert_eq!(1844, Reader::build(&path).unwrap().size)
     }
 }
 
