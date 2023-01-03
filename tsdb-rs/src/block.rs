@@ -1,4 +1,7 @@
-use crate::index;
+use crate::{
+    chunks::{self, ChunkReader},
+    index,
+};
 use anyhow::{anyhow, Result};
 use serde::{Deserialize, Serialize};
 use std::{
@@ -7,8 +10,6 @@ use std::{
     os::unix::prelude::MetadataExt,
     path::{Path, PathBuf},
 };
-
-use crate::chunks::{self, ChunkReader};
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct BlockStats {

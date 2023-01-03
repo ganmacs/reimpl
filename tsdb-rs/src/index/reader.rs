@@ -4,6 +4,7 @@ use super::symbols::{self, Symbols, SYMBOL_FACTOR};
 use super::{
     FormatVersion, CRC32_TABLE, FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN, MAGIC_INDEX,
 };
+use crate::model::labels::ScratchBuilder;
 use crate::seek_byte::{SeekReadBytesExt, VarUintByte};
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
@@ -25,13 +26,56 @@ struct PostingOffset {
     off: u64,
 }
 
+// postings table decoder
+struct Decorder {}
+
+const MAX_VARINT_LEN32: u64 = 5;
+
+impl Decorder {
+    fn postings(&self, b: Vec<u8>) -> Result<Postings> {
+        let mut buf = io::Cursor::new(b);
+        let len = buf.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
+        ensure!(len % 4 == 0, "invalid postings size");
+
+        Ok(Postings::new_big_endian(buf))
+    }
+
+    fn series(
+        &self,
+        b: Vec<u8>,
+        lookup_symbol: impl Fn(u64) -> Result<String>,
+    ) -> Result<ScratchBuilder> {
+        let mut builder = ScratchBuilder::new();
+
+        let mut buf = io::Cursor::new(b);
+        let k = buf.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+
+        for _ in 0..k {
+            let lno = buf.read_varint::<u64>().map_err(|e| anyhow!(e))? as u32;
+            let lvo = buf.read_varint::<u64>().map_err(|e| anyhow!(e))? as u32;
+
+            let name = lookup_symbol(lno as u64)?;
+            let value = lookup_symbol(lvo as u64)?;
+            builder.add(name, value);
+        }
+
+        // TODO: read chunk
+
+        Ok(builder)
+    }
+}
+
 pub struct Reader {
     inner: File,
     toc: Toc,
     symbols: Symbols,
     postings: HashMap<String, Vec<PostingOffset>>,
     name_symbols: HashMap<u64, String>,
+    decorder: Decorder,
+    version: FormatVersion,
 }
+
+type SeriesRef = u64;
 
 impl Reader {
     pub fn build<P: AsRef<Path>>(dir: P) -> Result<Reader> {
@@ -79,6 +123,8 @@ impl Reader {
             symbols,
             postings,
             name_symbols,
+            decorder: Decorder {},
+            version,
         })
     }
 
@@ -161,6 +207,25 @@ impl Reader {
         return Ok(Postings::new_merge(res));
     }
 
+    fn series(&mut self, id: SeriesRef) -> Result<ScratchBuilder> {
+        let offset = if self.version == FORMAT_V2 {
+            // padding is added to start seriese at multiple of 16.
+            id * 16
+        } else {
+            id
+        };
+
+        let buf = new_decbuf_uvarint_at(&mut self.inner, offset, Some(CRC32_TABLE))?;
+        self.decorder.series(buf, |v| self.lookup_symbol(v))
+    }
+
+    fn lookup_symbol(&self, off: u64) -> Result<String> {
+        if let Some(s) = self.name_symbols.get(&off) {
+            Ok(s.clone())
+        } else {
+            self.symbols.lookup(off)
+        }
+    }
 }
 
 fn new_postings_offset_table_format_v2(
@@ -301,9 +366,45 @@ pub(super) fn new_decbuf_at<T: io::Seek + io::Read + Sizable>(
     let len = inner
         .read_u32_at::<BigEndian>(offset)
         .map_err(|e| anyhow!(e))?;
+
     ensure!(
         // TODO: 4 is not needed when crc32 is not given.
-        offset + 4 + (len as u64) + 4 < size,
+        offset + 4 + (len as u64) + 4 <= size,
+        IndexHeaderError::InvalidBufSize(offset + 4 + (len as u64) + 4, size)
+    );
+
+    let mut buf = vec![0; len as usize];
+    inner.read_exact(&mut buf).map_err(|e| anyhow!(e))?;
+
+    if let Some(crc32) = crc32_table {
+        let expected_crc = inner.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
+        let actual = crc32.checksum(&buf);
+        ensure!(
+            actual == expected_crc,
+            IndexHeaderError::InvalidChucksum(expected_crc, actual)
+        );
+    }
+
+    Ok(buf)
+}
+
+fn new_decbuf_uvarint_at(
+    file: &mut File,
+    offset: u64,
+    crc32_table: Option<crc::Crc<u32>>,
+) -> Result<Vec<u8>> {
+    let size = file.metadata().map_err(|e| anyhow!(e))?.len();
+    ensure!(
+        offset + MAX_VARINT_LEN32 < size,
+        IndexHeaderError::InvalidBufSize(offset + MAX_VARINT_LEN32, size)
+    );
+
+    file.seek(SeekFrom::Start(offset)).map_err(|e| anyhow!(e))?;
+    let len = file.read_varint::<u32>().map_err(|e| anyhow!(e))?;
+
+    ensure!(
+        // TODO: get varint size to repalce 1
+        offset + 1 + (len as u64) + 4 < size,
         IndexHeaderError::InvalidBufSize(offset + 4, size)
     );
 
@@ -367,6 +468,7 @@ fn new_toc(file: &mut File) -> Result<Toc> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::labels::Labels;
     use env_logger::Env;
 
     fn init() {
@@ -422,6 +524,28 @@ mod tests {
     }
 
     #[test]
+    fn test_reader_postings() {
+        let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
+        let mut reader = Reader::build(path).unwrap();
+
+        let series = vec![
+            Labels::from_string(vec!["a", "1", "b", "1"]).unwrap(),
+            Labels::from_string(vec!["a", "1", "b", "2"]).unwrap(),
+            Labels::from_string(vec!["a", "1", "b", "3"]).unwrap(),
+            Labels::from_string(vec!["a", "1", "b", "4"]).unwrap(),
+        ];
+
+        let pos = reader
+            .postings("a", vec!["1"])
+            .unwrap()
+            .collect::<Vec<u64>>();
+
+        for i in 0..pos.len() {
+            assert_eq!(reader.series(pos[i]).unwrap().labels(), series[i]);
+        }
+    }
+
+    #[test]
     fn test_new_toc() {
         init();
 
@@ -438,7 +562,22 @@ mod tests {
                 postings_table: 4326,
             },
             toc,
-        )
+        );
+
+        let path = Path::new("tests/index_format_v2/simple").join(INDEX_FILE_NAME);
+        let mut file = File::open(path).unwrap();
+        let toc = new_toc(&mut file).unwrap();
+        assert_eq!(
+            Toc {
+                symbols: 5,
+                series: 29,
+                lable_indeices: 91,
+                label_indices_table: 264,
+                postings: 144,
+                postings_table: 284
+            },
+            toc,
+        );
     }
 
     #[test]

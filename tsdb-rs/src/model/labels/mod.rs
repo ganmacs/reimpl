@@ -17,7 +17,7 @@ impl Label {
 pub struct Labels(Vec<Label>);
 
 impl Labels {
-    pub fn from_string(ss: Vec<&str>) -> Result<Labels> {
+    pub(crate) fn from_string(ss: Vec<&str>) -> Result<Labels> {
         if ss.len() % 2 != 0 {
             bail!("invalid number of strings");
         }
@@ -57,7 +57,7 @@ impl fmt::Display for Labels {
 }
 
 #[derive(Clone)]
-struct ScratchBuilder {
+pub(crate) struct ScratchBuilder {
     add: Labels,
 }
 
