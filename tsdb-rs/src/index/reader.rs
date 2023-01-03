@@ -1,7 +1,10 @@
 use super::error::IndexError as IndexHeaderError;
-use super::{FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN, MAGIC_INDEX};
-use crate::seek_byte::SeekReadBytesExt;
+use super::postings::Postings;
 use super::symbols::{self, Symbols, SYMBOL_FACTOR};
+use super::{
+    FormatVersion, CRC32_TABLE, FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN, MAGIC_INDEX,
+};
+use crate::seek_byte::{SeekReadBytesExt, VarUintByte};
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use integer_encoding::VarIntReader;
@@ -78,6 +81,86 @@ impl Reader {
             name_symbols,
         })
     }
+
+    // values are orderd?
+    fn postings(&mut self, name: &str, values: Vec<&str>) -> Result<Postings> {
+        let Some(postings) = self.postings.get(name) else {
+            return Ok(Postings::new_empty());
+        };
+
+        if values.len() == 0 || postings.len() == 0 {
+            return Ok(Postings::new_empty());
+        }
+
+        let mut value_index = 0;
+
+        // skip values if the minimam posting table's value is greater than it.
+        while value_index < values.len() && values[value_index] < postings[0].value.as_str() {
+            value_index += 1;
+        }
+
+        if value_index == values.len() {
+            return Ok(Postings::new_empty());
+        }
+
+        let mut res = vec![];
+        let mut postings_tbl = new_decbuf_at(&mut self.inner, self.toc.postings_table, None)
+            .map(|v| io::Cursor::new(v))?;
+
+        let lable_name_end_offset = postings.last().unwrap().off;
+        while value_index < values.len() {
+            let i = match postings.binary_search_by(|p| p.value.as_str().cmp(values[value_index])) {
+                Ok(v) => v,
+                Err(0) => {
+                    unreachable!("already checked above");
+                }
+                Err(v) if v == postings.len() => {
+                    // return Ok(Postings::new_empty()),
+                    break;
+                }
+                // check existence from prev entry
+                Err(v) => v - 1,
+            };
+
+            postings_tbl.set_position(postings[i].off);
+
+            let _key_count = postings_tbl.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+            let _label_name = postings_tbl.read_varint_bytes().map_err(|e| anyhow!(e))?;
+            // key_count and label_name are  the same till lable_name_end_offset.
+            // it's faster to skip than parse
+            let skip = (postings_tbl.position() as i64) - (postings[i].off as i64);
+
+            let mut lv = postings_tbl.read_varint_bytes().map_err(|e| anyhow!(e))?;
+            let mut label_value = str::from_utf8(lv.as_ref()).map_err(|e| anyhow!(e))?;
+            let mut postings_offset = postings_tbl.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+            postings_tbl
+                .seek(SeekFrom::Current(skip))
+                .map_err(|e| anyhow!(e))?;
+
+            // search label_value
+            while label_value < values[value_index]
+                && postings_tbl.position() <= lable_name_end_offset
+            {
+                lv = postings_tbl.read_varint_bytes().map_err(|e| anyhow!(e))?;
+                label_value = str::from_utf8(lv.as_ref()).map_err(|e| anyhow!(e))?;
+                postings_offset = postings_tbl.read_varint::<u64>().map_err(|e| anyhow!(e))?;
+                postings_tbl
+                    .seek(SeekFrom::Current(skip))
+                    .map_err(|e| anyhow!(e))?;
+            }
+
+            while value_index < values.len() && values[value_index] <= label_value {
+                if values[value_index] == label_value {
+                    // expected there are no duplicated values
+                    let buf = new_decbuf_at(&mut self.inner, postings_offset, Some(CRC32_TABLE))?;
+                    res.push(self.decorder.postings(buf)?);
+                }
+                value_index += 1;
+            }
+        }
+        return Ok(Postings::new_merge(res));
+    }
+
 }
 
 fn new_postings_offset_table_format_v2(

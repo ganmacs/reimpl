@@ -2,6 +2,46 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::collections::BinaryHeap;
 use std::io;
 
+pub enum Postings {
+    Merged(MergedPostings),
+    Empty(EmptyPostings),
+    BigEndian(BigEndianPostings),
+
+    // only for test
+    List(ListPostings),
+}
+
+impl Postings {
+    pub(crate) fn new_empty() -> Self {
+        Postings::Empty(EmptyPostings)
+    }
+
+    pub(crate) fn new_merge(inner: Vec<Postings>) -> Self {
+        Postings::Merged(MergedPostings::new(inner))
+    }
+
+    pub(crate) fn new_big_endian(inner: io::Cursor<Vec<u8>>) -> Self {
+        Postings::BigEndian(BigEndianPostings::new(inner))
+    }
+
+    fn new_list(inner: Vec<u64>) -> Self {
+        Postings::List(ListPostings::new(inner))
+    }
+}
+
+impl Iterator for Postings {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        match self {
+            Postings::Merged(inner) => inner.next(),
+            Postings::BigEndian(inner) => inner.next(),
+            Postings::Empty(inner) => inner.next(),
+            Postings::List(inner) => inner.next(),
+        }
+    }
+}
+
 pub struct ErrorPostings {
     err: String,
 }
@@ -12,14 +52,14 @@ pub struct BigEndianPostings {
     inner: io::Cursor<Vec<u8>>,
 }
 
-pub struct MergedPostings<T> {
-    inner: Vec<T>,
+pub struct MergedPostings {
+    inner: Vec<Postings>,
     prev: Option<u64>,
     heap: BinaryHeap<(i64, usize)>,
 }
 
-impl<T: Postings> MergedPostings<T> {
-    fn new(inner: Vec<T>) -> Self {
+impl MergedPostings {
+    fn new(inner: Vec<Postings>) -> Self {
         let mut pos = MergedPostings {
             inner,
             prev: None,
@@ -50,7 +90,7 @@ impl Iterator for EmptyPostings {
     }
 }
 
-impl<T: Postings> Iterator for MergedPostings<T> {
+impl Iterator for MergedPostings {
     type Item = u64;
 
     fn next(&mut self) -> Option<u64> {
@@ -82,46 +122,41 @@ impl Iterator for BigEndianPostings {
     }
 }
 
-pub trait Postings: Iterator<Item = u64> {}
-impl<T: Postings> Postings for MergedPostings<T> {}
-impl Postings for EmptyPostings {}
-impl Postings for BigEndianPostings {}
+// only for test
+pub struct ListPostings {
+    cur: usize,
+    inner: Vec<u64>,
+}
+
+impl ListPostings {
+    fn new(inner: Vec<u64>) -> Self {
+        ListPostings { cur: 0, inner }
+    }
+}
+
+impl Iterator for ListPostings {
+    type Item = u64;
+
+    fn next(&mut self) -> Option<u64> {
+        if self.inner.len() <= self.cur {
+            None
+        } else {
+            let v = self.inner[self.cur];
+            self.cur += 1;
+            Some(v)
+        }
+    }
+}
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    struct ListPostings {
-        cur: usize,
-        list: Vec<u64>,
-    }
-
-    impl ListPostings {
-        fn new(list: Vec<u64>) -> Self {
-            ListPostings { cur: 0, list }
-        }
-    }
-
-    impl Iterator for ListPostings {
-        type Item = u64;
-
-        fn next(&mut self) -> Option<u64> {
-            if self.list.len() <= self.cur {
-                None
-            } else {
-                let v = self.list[self.cur];
-                self.cur += 1;
-                Some(v)
-            }
-        }
-    }
-    impl Postings for ListPostings {}
-
     #[test]
     fn test_merged_postigns() {
-        let pos1 = ListPostings::new(vec![1, 2, 3, 4, 5, 6, 7, 1000, 1001]);
-        let pos2 = ListPostings::new(vec![2, 4, 5, 6, 7, 8, 999, 1001]);
-        let pos3 = ListPostings::new(vec![1, 2, 5, 6, 7, 8, 1001, 1200]);
+        let pos1 = Postings::new_list(vec![1, 2, 3, 4, 5, 6, 7, 1000, 1001]);
+        let pos2 = Postings::new_list(vec![2, 4, 5, 6, 7, 8, 999, 1001]);
+        let pos3 = Postings::new_list(vec![1, 2, 5, 6, 7, 8, 1001, 1200]);
 
         let pos = MergedPostings::new(vec![pos1, pos2, pos3]).collect::<Vec<u64>>();
 
