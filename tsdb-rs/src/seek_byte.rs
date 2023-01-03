@@ -1,4 +1,5 @@
-use byteorder::ReadBytesExt;
+use byteorder::{ReadBytesExt};
+use integer_encoding::{VarIntReader, VarIntWriter};
 use std::io::{self, Seek, SeekFrom};
 
 pub trait SeekReadBytesExt: io::Read + Seek {
@@ -28,3 +29,24 @@ pub trait SeekReadBytesExt: io::Read + Seek {
 }
 
 impl<R: io::Read + Seek> SeekReadBytesExt for R {}
+
+pub(crate) trait VarUintByte: VarIntReader + io::Read {
+    fn read_varint_bytes(&mut self) -> io::Result<Vec<u8>> {
+        let size = self.read_varint::<u64>()? as usize;
+        let mut buf = vec![0; size];
+        self.read_exact(&mut buf)?;
+        return Ok(buf);
+    }
+}
+
+impl<R: VarIntReader + io::Read> VarUintByte for R {}
+
+pub(crate) trait VarUintByteWriter: VarIntWriter + io::Write {
+    fn write_varint_str(&mut self, b: &str) -> io::Result<()> {
+        self.write_varint(b.len() as u64)? as usize;
+        self.write(b.as_bytes())?;
+        Ok(())
+    }
+}
+
+impl<W: VarIntWriter + io::Write> VarUintByteWriter for W {}

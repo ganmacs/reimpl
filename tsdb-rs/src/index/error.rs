@@ -17,7 +17,7 @@ pub enum IndexError {
     #[error("invalid index toc size (expected {}, got {0:?})", HEADER_LEN)]
     InvalidTocSize(u64),
 
-    #[error("invlid index checksum (expected {0:#x}, got {1:#x})")]
+    #[error("invalid index checksum (expected {0:#x}, got {1:#x})")]
     InvalidChucksum(
         u32,
         u32

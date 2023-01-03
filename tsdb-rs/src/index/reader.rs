@@ -1,6 +1,7 @@
 use super::error::IndexError as IndexHeaderError;
 use super::{FORMAT_V1, FORMAT_V2, HEADER_LEN, INDEX_TOC_LEN, MAGIC_INDEX};
 use crate::seek_byte::SeekReadBytesExt;
+use super::symbols::{self, Symbols, SYMBOL_FACTOR};
 use anyhow::{anyhow, ensure, Result};
 use byteorder::{BigEndian, ReadBytesExt};
 use integer_encoding::VarIntReader;
@@ -14,8 +15,6 @@ use std::{
 };
 
 const INDEX_FILE_NAME: &str = "index";
-
-const CRC32_TABLE: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
 
 #[derive(Debug, PartialEq)]
 struct PostingOffset {
@@ -51,7 +50,7 @@ impl Reader {
         );
 
         let toc = new_toc(&mut file)?;
-        let symbols = new_symbols(&mut file, toc.symbols)?;
+        let symbols = symbols::new(&mut file, FORMAT_V2, toc.symbols)?;
         let postings = if version == FORMAT_V1 {
             // TODO
             HashMap::new()
@@ -81,93 +80,6 @@ impl Reader {
     }
 }
 
-const SYMBOL_FACTOR: usize = 32;
-
-#[derive(Debug, PartialEq)]
-pub struct Symbols {
-    inner: Vec<u8>,
-    off: u64,
-
-    offsets: Vec<u64>,
-    seen: u64,
-}
-
-impl Symbols {
-    fn reverse_lookup(&self, sym: &str) -> Result<u64> {
-        if self.offsets.len() == 0 {
-            return Err(anyhow!("unknown symobl {:?} - no symbols", sym));
-        }
-        let mut cur = io::Cursor::new(&self.inner);
-        let i = self
-            .offsets
-            .binary_search_by(|off| {
-                cur.seek(SeekFrom::Start(*off)).unwrap();
-                let v = cur.read_varint_bytes().unwrap();
-                let s = str::from_utf8(v.as_ref()).unwrap();
-
-                s.cmp(sym)
-            })
-            .unwrap_or_else(|v| v);
-        let i = if i > 0 { i - 1 } else { i };
-
-        let mut res = (i * SYMBOL_FACTOR) as u64;
-
-        cur.seek(SeekFrom::Start(self.offsets[i]))
-            .map_err(|v| anyhow!(v))?;
-
-        while res < self.seen {
-            let last_symbol = cur.read_varint_bytes().map_err(|v| anyhow!(v))?;
-            let s = str::from_utf8(last_symbol.as_ref()).map_err(|v| anyhow!(v))?;
-
-            if s == sym {
-                return Ok(res);
-            } else if s > sym {
-                return Err(anyhow!("Not found: key {:?}", sym));
-            }
-
-            res += 1
-        }
-
-        Err(anyhow!("Not found: key {:?}", sym))
-    }
-}
-
-fn new_symbols(file: &mut File, offset: u64) -> Result<Symbols> {
-    let buf = new_decbuf_at(file, offset, Some(CRC32_TABLE))?;
-    let mut content = io::Cursor::new(&buf);
-    let count = content.read_u32::<BigEndian>().map_err(|e| anyhow!(e))? as usize;
-
-    let mut offsets = vec![];
-    let mut seen = 0;
-    while seen < count {
-        if seen % SYMBOL_FACTOR == 0 {
-            // skip len
-            offsets.push(content.position());
-        }
-        // consume position
-        let _ = content.read_varint_bytes().map_err(|e| anyhow!(e))?;
-        seen += 1;
-    }
-
-    Ok(Symbols {
-        inner: buf,
-        off: offset,
-        offsets,
-        seen: seen as u64,
-    })
-}
-
-trait VarUintByte: VarIntReader + Read {
-    fn read_varint_bytes(&mut self) -> io::Result<Vec<u8>> {
-        let size = self.read_varint::<u64>()? as usize;
-        let mut buf = vec![0; size];
-        self.read_exact(&mut buf)?;
-        return Ok(buf);
-    }
-}
-
-impl<R: VarIntReader + io::Read> VarUintByte for R {}
-
 fn new_postings_offset_table_format_v2(
     file: &mut File,
     postings_offset: u64,
@@ -191,6 +103,7 @@ fn new_postings_offset_table_format_v2(
 
             if !postings.contains_key(&name_str) {
                 postings.insert(name_str.clone(), vec![]);
+                // store the last value for each label name
                 store_value(&mut postings, &mut prev_value)?;
                 value_count = 0;
             }
@@ -268,20 +181,41 @@ fn new_postings_offset_table(
     Ok(())
 }
 
+pub(super) trait Sizable {
+    fn len(&self) -> Result<usize>;
+}
+
+impl Sizable for File {
+    fn len(&self) -> Result<usize> {
+        self.metadata()
+            .map(|v| v.len() as usize)
+            .map_err(|e| anyhow!(e))
+    }
+}
+
+impl<T> Sizable for io::Cursor<T>
+where
+    T: AsRef<[u8]>,
+{
+    fn len(&self) -> Result<usize> {
+        Ok(self.get_ref().as_ref().len())
+    }
+}
+
 // expect the following binary format
 // byte len(4b) | content | (checksum(4b))?
-fn new_decbuf_at(
-    file: &mut File,
+pub(super) fn new_decbuf_at<T: io::Seek + io::Read + Sizable>(
+    inner: &mut T,
     offset: u64,
     crc32_table: Option<crc::Crc<u32>>,
 ) -> Result<Vec<u8>> {
-    let size = file.metadata().map_err(|e| anyhow!(e))?.len();
+    let size = inner.len()? as u64;
     ensure!(
-        offset + 4 < size,
+        offset + 4 <= size,
         IndexHeaderError::InvalidBufSize(offset + 4, size)
     );
 
-    let len = file
+    let len = inner
         .read_u32_at::<BigEndian>(offset)
         .map_err(|e| anyhow!(e))?;
     ensure!(
@@ -432,22 +366,9 @@ mod tests {
         let mut file = File::open(path).unwrap();
         let toc = new_toc(&mut file).unwrap();
 
-        let symbols = new_symbols(&mut file, toc.symbols).unwrap();
+        let symbols = symbols::new(&mut file, FORMAT_V2, toc.symbols).unwrap();
         assert_eq!(5, symbols.off);
         assert_eq!(104, symbols.seen);
         assert_eq!(vec![4, 96, 189, 282], symbols.offsets);
-    }
-
-    #[test]
-    fn test_symbol_reverse_lookup() {
-        let sym = Symbols {
-            inner: vec![0, 0, 0, 6, 1, 49, 1, 50, 1, 51, 1, 52, 1, 97, 1, 98],
-            off: 5,
-            offsets: vec![4],
-            seen: 6,
-        };
-
-        assert_eq!(4, sym.reverse_lookup(&("a".to_string())).unwrap());
-        assert_eq!(5, sym.reverse_lookup(&("b".to_string())).unwrap());
     }
 }
