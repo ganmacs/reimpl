@@ -1,0 +1,17 @@
+{
+	"ulid": "01GNXGKS4HSZSQ5KX88D79BJTN",
+	"minTime": 0,
+	"maxTime": 7200000,
+	"stats": {
+		"numSamples": 102,
+		"numSeries": 102,
+		"numChunks": 102
+	},
+	"compaction": {
+		"level": 1,
+		"sources": [
+			"01GNXGKS4HSZSQ5KX88D79BJTN"
+		]
+	},
+	"version": 1
+}
