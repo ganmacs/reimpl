@@ -7,7 +7,7 @@ use super::{
 use crate::model::labels::ScratchBuilder;
 use crate::seek_byte::{SeekReadBytesExt, VarUintByte};
 use anyhow::{anyhow, ensure, Result};
-use byteorder::{BigEndian, ReadBytesExt};
+use byteorder::{BigEndian, ByteOrder, ReadBytesExt};
 use integer_encoding::VarIntReader;
 use std::{
     collections::HashMap,
@@ -32,12 +32,14 @@ struct Decorder {}
 const MAX_VARINT_LEN32: u64 = 5;
 
 impl Decorder {
-    fn postings(&self, b: Vec<u8>) -> Result<Postings> {
-        let mut buf = io::Cursor::new(b);
-        let len = buf.read_u32::<BigEndian>().map_err(|e| anyhow!(e))?;
-        ensure!(len % 4 == 0, "invalid postings size");
+    fn postings(&self, mut b: Vec<u8>) -> Result<Postings> {
+        // let mut buf = io::Cursor::new(b);
+        ensure!(b.len() >= 4, "postings size is insufficient");
+        let len = BigEndian::read_u32(&b[0..]);
+        let _ = b.splice(0..4, vec![]); // remove
 
-        Ok(Postings::new_big_endian(buf))
+        ensure!(len % 4 == 0, "invalid postings size");
+        Ok(Postings::new_big_endian(b))
     }
 
     fn series(
