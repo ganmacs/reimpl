@@ -3,8 +3,6 @@ use byteorder::{BigEndian, ReadBytesExt};
 use std::fs::{self, File};
 use std::path::{Path, PathBuf};
 
-use super::ChunkReader;
-
 pub struct Reader {
     bs: Vec<File>,
     size: u64,
@@ -105,9 +103,4 @@ mod tests {
         let path = Path::new("tests/index_format_v1/chunks");
         assert_eq!(1844, Reader::build(&path).unwrap().size)
     }
-}
-
-impl ChunkReader for Reader {
-    fn chunk() {}
-    fn close() {}
 }

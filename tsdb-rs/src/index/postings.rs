@@ -25,6 +25,14 @@ impl Postings {
         Postings::BigEndian(BigEndianPostings::new(inner))
     }
 
+    pub(crate) fn new_intersect(inner: Vec<Postings>) -> Self {
+        match inner.len() {
+            0 => Self::new_empty(),
+            1 => inner[0].clone(),
+            _ => Postings::Intersect(IntersectPostings::new(inner)),
+        }
+    }
+
     fn new_list(inner: Vec<u64>) -> Self {
         Postings::List(ListPostings::new(inner))
     }

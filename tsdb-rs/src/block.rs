@@ -1,11 +1,11 @@
-use crate::{
-    chunks::{self, ChunkReader},
-    index,
-};
-use anyhow::{anyhow, Result};
+use crate::chunks;
+use crate::index::IndexReader;
+use anyhow::{anyhow, Context as _, Result};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::{Arc, RwLock};
 use std::{fs::File, io::BufReader};
+use ulid::Ulid;
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
 struct BlockStats {
@@ -26,8 +26,8 @@ struct BlockMetaCompaction {
 }
 
 #[derive(Deserialize, Serialize, Debug, PartialEq)]
-struct BlockMeta {
-    ulid: String,
+pub(crate) struct BlockMeta {
+    pub(crate) ulid: Ulid,
     #[serde(rename = "minTime")]
     min_time: i64,
     #[serde(rename = "maxTime")]
@@ -38,32 +38,46 @@ struct BlockMeta {
     version: u64,
 }
 
-pub struct Block<CR: ChunkReader> {
+pub struct Block {
     dir: PathBuf,
-    meta: BlockMeta,
+    meta: Arc<BlockMeta>,
     num_byte_meta: u64,
-    chunk_reader: CR,
-    index_reader: index::Reader,
+    chunk_reader: chunks::Reader,
+    index_reader: Arc<RwLock<IndexReader>>,
 }
 
-pub(crate) fn open<P: AsRef<Path>>(p: &P) -> anyhow::Result<Block<chunks::Reader>> {
-    let (meta, num_byte_meta) = read_meta_file(p)?;
-    let chunk_reader = chunks::Reader::build(p)?;
-    let index_reader = index::Reader::build(p)?;
-
-    Ok(Block {
-        dir: PathBuf::from(p.as_ref()),
-        meta,
-        num_byte_meta,
-        chunk_reader,
-        index_reader,
-    })
-}
+pub(crate) const INDEX_FILE_NAME: &str = "index";
 
 const META_FILE_NAME: &str = "meta.json";
 const META_VERSION1: u64 = 1;
 
-fn read_meta_file<P: AsRef<Path>>(dir: P) -> Result<(BlockMeta, u64)> {
+impl Block {
+    pub(crate) fn open<P: AsRef<Path>>(p: &P) -> anyhow::Result<Block> {
+        let (meta, num_byte_meta) = read_meta_file(p)?;
+        let chunk_reader = chunks::Reader::build(p)?;
+        let path = p.as_ref();
+        let index_reader = Arc::new(RwLock::new(IndexReader::build(&path.join(INDEX_FILE_NAME))?));
+        let meta = Arc::new(meta);
+
+        Ok(Block {
+            dir: PathBuf::from(path),
+            meta,
+            num_byte_meta,
+            chunk_reader,
+            index_reader,
+        })
+    }
+
+    pub(crate) fn index(&self) -> Arc<RwLock<IndexReader>> {
+        self.index_reader.clone()
+    }
+
+    pub(crate) fn meta(&self) -> Arc<BlockMeta> {
+        self.meta.clone()
+    }
+}
+
+pub(super) fn read_meta_file<P: AsRef<Path>>(dir: P) -> Result<(BlockMeta, u64)> {
     let meta_path = dir.as_ref().join(META_FILE_NAME);
     let b = File::open(meta_path).map_err(|e| anyhow!(e))?;
     let size = b.metadata().map(|v| v.len()).map_err(|e| anyhow!(e))?;
@@ -79,6 +93,8 @@ fn read_meta_file<P: AsRef<Path>>(dir: P) -> Result<(BlockMeta, u64)> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::model::labels::matcher::Matcher;
+    use crate::querier::BlockQuerier;
     use env_logger::Env;
 
     fn init() {
@@ -92,7 +108,7 @@ mod tests {
 
         let (actual_data, actual_size) = read_meta_file("tests/index_format_v1").unwrap();
         let expected = BlockMeta {
-            ulid: "01DXXFZDYD1MQW6079WK0K6EDQ".to_string(),
+            ulid: Ulid::from_string("01DXXFZDYD1MQW6079WK0K6EDQ").unwrap(),
             version: 1,
             min_time: 0,
             max_time: 7200000,
@@ -111,4 +127,12 @@ mod tests {
         assert_eq!(expected, actual_data);
         assert_eq!(255, actual_size);
     }
+
+    // #[test]
+    // fn test_block_test() {
+        // let block = Block::open(&"tests/index_format_v2/simple2").unwrap();
+        // let mut querier = BlockQuerier::new(&block);
+
+        // let ret = querier.select(vec![Matcher::new_must_matcher("foo", "bar")]);
+    // }
 }

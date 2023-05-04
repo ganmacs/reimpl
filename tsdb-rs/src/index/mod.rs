@@ -1,5 +1,5 @@
 pub mod error;
-pub mod postings;
+mod postings;
 pub mod reader;
 pub mod symbols;
 
@@ -15,4 +15,5 @@ const INDEX_TOC_LEN: u64 = 6 * 8 + INDEX_TOC_CRC32_LEN; // 8b*6 + 4b
 
 pub(self) const CRC32_TABLE: crc::Crc<u32> = crc::Crc::<u32>::new(&crc::CRC_32_ISCSI);
 
-pub use reader::Reader;
+pub(crate) use postings::Postings;
+pub use reader::Reader as IndexReader;

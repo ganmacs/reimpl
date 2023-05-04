@@ -18,8 +18,6 @@ use std::{
     str,
 };
 
-const INDEX_FILE_NAME: &str = "index";
-
 #[derive(Debug, PartialEq)]
 struct PostingOffset {
     value: String,
@@ -38,7 +36,7 @@ impl Decorder {
         let len = BigEndian::read_u32(&b[0..]);
         let _ = b.splice(0..4, vec![]); // remove
 
-        ensure!(len % 4 == 0, "invalid postings size");
+        ensure!(len as usize * 4 == b.len(), format!("invalid postings size {:?} != {:?}", len * 4, b.len()));
         Ok(Postings::new_big_endian(b))
     }
 
@@ -80,8 +78,8 @@ pub struct Reader {
 type SeriesRef = u64;
 
 impl Reader {
-    pub fn build<P: AsRef<Path>>(dir: &P) -> Result<Reader> {
-        let mut file = File::open(dir).map_err(|e| anyhow!(e))?;
+    pub fn build<P: AsRef<Path>>(path: &P) -> Result<Reader> {
+        let mut file = File::open(path).map_err(|e| anyhow!(e))?;
 
         let size = file.metadata().map_err(|e| anyhow!(e))?.len();
         ensure!(HEADER_LEN < size, IndexHeaderError::InvalidSize(size));
@@ -101,8 +99,7 @@ impl Reader {
         let toc = new_toc(&mut file)?;
         let symbols = symbols::new(&mut file, FORMAT_V2, toc.symbols)?;
         let postings = if version == FORMAT_V1 {
-            // TODO
-            HashMap::new()
+            todo!("not support format ${:?} yet", version);
         } else {
             new_postings_offset_table_format_v2(&mut file, toc.postings_table)?
         };
@@ -131,7 +128,7 @@ impl Reader {
     }
 
     // values are orderd?
-    fn postings(&mut self, name: &str, values: Vec<&str>) -> Result<Postings> {
+    pub(crate) fn postings(&mut self, name: &str, values: Vec<&str>) -> Result<Postings> {
         let Some(postings) = self.postings.get(name) else {
             return Ok(Postings::new_empty());
         };
@@ -152,6 +149,7 @@ impl Reader {
         }
 
         let mut res = vec![];
+        // TODO: not mutable
         let mut postings_tbl = new_decbuf_at(&mut self.inner, self.toc.postings_table, None)
             .map(|v| io::Cursor::new(v))?;
 
@@ -200,16 +198,18 @@ impl Reader {
             while value_index < values.len() && values[value_index] <= label_value {
                 if values[value_index] == label_value {
                     // expected there are no duplicated values
+                    // TODO: immutable
                     let buf = new_decbuf_at(&mut self.inner, postings_offset, Some(CRC32_TABLE))?;
                     res.push(self.decorder.postings(buf)?);
                 }
                 value_index += 1;
+
             }
         }
         return Ok(Postings::new_merge(res));
     }
 
-    fn series(&mut self, id: SeriesRef) -> Result<ScratchBuilder> {
+    pub(crate) fn series(&mut self, id: SeriesRef) -> Result<ScratchBuilder> {
         let offset = if self.version == FORMAT_V2 {
             // padding is added to start seriese at multiple of 16.
             id * 16
@@ -469,6 +469,7 @@ fn new_toc(file: &mut File) -> Result<Toc> {
 
 #[cfg(test)]
 mod tests {
+    use super::super::super::block::INDEX_FILE_NAME;
     use super::*;
     use crate::model::labels::Labels;
     use env_logger::Env;
@@ -539,6 +540,25 @@ mod tests {
 
         let pos = reader
             .postings("a", vec!["1"])
+            .unwrap()
+            .collect::<Vec<u64>>();
+
+        for i in 0..pos.len() {
+            assert_eq!(reader.series(pos[i]).unwrap().labels(), series[i]);
+        }
+    }
+
+    #[test]
+    fn test_reader_postings2() {
+        let path = Path::new("tests/index_format_v2/simple2/01GNXGKS4HSZSQ5KX88D79BJTN").join(INDEX_FILE_NAME);
+        let mut reader = Reader::build(&path).unwrap();
+
+        let series = vec![
+            Labels::from_string(vec!["bar", "1"]).unwrap(),
+        ];
+
+        let pos = reader
+            .postings("bar", vec!["1"])
             .unwrap()
             .collect::<Vec<u64>>();
 

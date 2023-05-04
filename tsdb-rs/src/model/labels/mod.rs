@@ -1,3 +1,5 @@
+pub mod matcher;
+
 use anyhow::{bail, Result};
 use std::fmt;
 
