@@ -6,12 +6,17 @@ use std::ops::DerefMut;
 use std::sync::{Arc, RwLock};
 use ulid::Ulid;
 
-pub(crate) struct BlockQuerier {
+pub(crate) fn open(b: Arc<block::Block>) -> BlockQuerier {
+    return BlockQuerier::new(b.as_ref());
+}
+
+pub struct BlockQuerier {
     block_id: Ulid,
     index: Arc<RwLock<IndexReader>>,
 }
 
-struct ChunkSeriesEntry {
+#[derive(Debug)]
+pub struct ChunkSeriesEntry {
     labels: Labels,
 }
 
@@ -23,7 +28,7 @@ impl BlockQuerier {
         }
     }
 
-    fn select(&mut self, matchers: Vec<Matcher>) -> Result<BlockSeriesSet> {
+    pub fn inner_select(&mut self, matchers: Vec<Matcher>) -> Result<BlockSeriesSet> {
         let index_reader = self.index.clone();
         let mut reader = index_reader.write().map_err(|e| anyhow!(e.to_string()))?;
         let postings = postings_for_matchers(reader.deref_mut(), matchers)?;
@@ -33,7 +38,8 @@ impl BlockQuerier {
     }
 }
 
-struct BlockSeriesSet {
+
+pub struct BlockSeriesSet {
     index: Arc<RwLock<IndexReader>>,
     postings: Postings,
 }
@@ -119,7 +125,7 @@ mod tests {
         let b = Block::open(&path).unwrap();
         let mut querier = BlockQuerier::new(&b);
         let mut ret = querier
-            .select(vec![Matcher::new_must_matcher("bar", "0")])
+            .inner_select(vec![Matcher::new_must_matcher("bar", "0")])
             .unwrap();
 
         assert_eq!(

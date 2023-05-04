@@ -1,4 +1,6 @@
 use crate::block::{self, Block};
+use crate::querier::{self, BlockQuerier};
+use crate::storage::merge::{new_generic_querier, MergeGenericQuerier};
 use anyhow::{anyhow, Result};
 use log::warn;
 use std::io;
@@ -6,12 +8,15 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use ulid::Ulid;
 
-pub fn blocks<P: AsRef<Path>>(p: &P) -> Option<u8> {
-    Some(1)
-    // block::open(p)
+pub fn open<P: AsRef<Path>>(path: &P) -> Result<DB> {
+    // mkdir
+    let mut db = DB::open();
+    db.reload_blocks(path)?;
+
+    return Ok(db);
 }
 
-struct DB {
+pub struct DB {
     blocks: Vec<Arc<Block>>,
 }
 
@@ -26,11 +31,20 @@ impl DB {
 
         Ok(())
     }
+
+    pub fn querier(&self) -> MergeGenericQuerier<BlockQuerier> {
+        let mut queriers: Vec<BlockQuerier> = vec![];
+        for b in self.blocks.iter() {
+            let querier = querier::open(b.clone());
+            queriers.push(querier);
+        }
+
+        return new_generic_querier(queriers);
+    }
 }
 
 fn open_blocks<P: AsRef<Path>>(p: &P, loaded: Vec<Arc<Block>>) -> Result<Vec<Arc<Block>>> {
     let blocks_dir = block_dirs(p).map_err(|e| anyhow!(e))?;
-
     let mut blocks = vec![];
     for b_dir in blocks_dir {
         let Ok((meta, _)) = block::read_meta_file(&b_dir) else {

@@ -1,7 +1,12 @@
 mod block;
 mod chunks;
-pub mod db;
+mod db;
 mod index;
 mod model;
 mod querier;
 mod seek_byte;
+mod storage;
+
+pub use db::open;
+pub use storage::Querier;
+pub use model::labels::matcher::Matcher;

@@ -1,12 +1,12 @@
 use std::string::ToString;
 
-pub(crate) enum Matcher {
+pub enum Matcher {
     MatchEqual(MustMatch),
     MatchNotEqual(MustMatch),
 }
 
 impl Matcher {
-    pub(crate) fn new_must_matcher<T: ToString>(name: T, value: T) -> Self {
+    pub fn new_must_matcher<T: ToString>(name: T, value: T) -> Self {
         Matcher::MatchEqual(MustMatch {
             name: name.to_string(),
             value: value.to_string(),
@@ -21,7 +21,7 @@ impl Matcher {
     }
 }
 
-pub(crate) struct MustMatch {
+pub struct MustMatch {
     pub(crate) name: String,
     pub(crate) value: String,
 }
